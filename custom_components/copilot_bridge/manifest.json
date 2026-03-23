@@ -1,0 +1,19 @@
+{
+  "domain": "copilot_bridge",
+  "name": "Copilot Bridge",
+  "codeowners": [
+    "@amantux"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "conversation"
+  ],
+  "documentation": "https://github.com/amantux/ha-copilot-bridge",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "loggers": [
+    "custom_components.copilot_bridge"
+  ],
+  "version": "0.1.0"
+}
+

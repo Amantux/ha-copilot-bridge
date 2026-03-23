@@ -1,0 +1,102 @@
+ask:
+  name: Ask Copilot Bridge
+  description: Send a prompt to the local Copilot bridge and return the response.
+  fields:
+    prompt:
+      name: Prompt
+      description: The text prompt to send to the bridge.
+      required: true
+      selector:
+        text:
+    session_id:
+      name: Session ID
+      description: Optional session identifier to continue a thread.
+      required: false
+      selector:
+        text:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when multiple bridge entries exist.
+      required: false
+      selector:
+        text:
+    user_id:
+      name: User ID
+      description: Optional Home Assistant user identifier.
+      required: false
+      selector:
+        text:
+    use_home_assistant_mcp:
+      name: Use Home Assistant MCP
+      description: Optionally ask the bridge to include the configured Home Assistant MCP server for this request.
+      required: false
+      selector:
+        boolean:
+
+get_github_auth_status:
+  name: Get GitHub auth status
+  description: Return the current GitHub authentication status from the bridge.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when multiple bridge entries exist.
+      required: false
+      selector:
+        text:
+
+start_github_device_flow:
+  name: Start GitHub device flow
+  description: Start the GitHub device authorization flow and return the verification code and URL.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when multiple bridge entries exist.
+      required: false
+      selector:
+        text:
+    scopes:
+      name: Scopes
+      description: Optional space-delimited GitHub OAuth scopes to request instead of the add-on defaults.
+      required: false
+      selector:
+        text:
+
+poll_github_device_flow:
+  name: Poll GitHub device flow
+  description: Poll the GitHub device flow until it is authorized, denied, or still pending.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when multiple bridge entries exist.
+      required: false
+      selector:
+        text:
+
+set_github_token:
+  name: Set GitHub token
+  description: Validate and store a GitHub token for the bridge.
+  fields:
+    token:
+      name: Token
+      description: GitHub PAT or OAuth token to validate and store.
+      required: true
+      selector:
+        text:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when multiple bridge entries exist.
+      required: false
+      selector:
+        text:
+
+clear_github_auth:
+  name: Clear GitHub auth
+  description: Remove the stored GitHub auth state and any pending device flow session.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when multiple bridge entries exist.
+      required: false
+      selector:
+        text:
+

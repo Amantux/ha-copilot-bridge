@@ -1,0 +1,14 @@
+#!/usr/bin/with-contenv bashio
+
+export BRIDGE_PORT=8099
+export BRIDGE_API_KEY="$(bashio::config 'bridge_api_key')"
+export GITHUB_TOKEN="$(bashio::config 'github_token')"
+export GITHUB_OAUTH_CLIENT_ID="$(bashio::config 'github_oauth_client_id')"
+export GITHUB_OAUTH_SCOPES="$(bashio::config 'github_oauth_scopes')"
+export ENABLE_HOME_ASSISTANT_MCP="$(bashio::config 'enable_home_assistant_mcp')"
+export HOME_ASSISTANT_MCP_URL="$(bashio::config 'home_assistant_mcp_url')"
+export HOME_ASSISTANT_MCP_API_KEY="$(bashio::config 'home_assistant_mcp_api_key')"
+export ALLOWED_PATHS="$(bashio::config 'allowed_paths')"
+
+exec python3 /app/server.py
+

@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Copilot Bridge",
+        "description": "Connect Home Assistant to the local Copilot bridge service.",
+        "data": {
+          "url": "Bridge URL",
+          "api_key": "API key",
+          "use_home_assistant_mcp": "Use Home Assistant MCP server",
+          "home_assistant_mcp_server_name": "Home Assistant MCP server name"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the bridge service"
+    },
+    "abort": {
+      "already_configured": "This bridge is already configured"
+    }
+  }
+}

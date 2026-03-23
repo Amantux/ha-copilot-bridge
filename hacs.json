@@ -1,0 +1,10 @@
+{
+  "name": "Copilot Bridge",
+  "content_in_root": false,
+  "domains": [
+    "copilot_bridge"
+  ],
+  "homeassistant": "2025.3.0",
+  "render_readme": true
+}
+
