@@ -27,7 +27,9 @@ It currently provides:
 
 ### Add-on bridge
 
-The add-on lives in `addons/copilot_bridge`.
+The add-on now has a **repository-discoverable root folder** at `copilot_bridge/` so Home Assistant can find it from the Add-ons area.
+
+The original scaffold also remains under `addons/copilot_bridge` as a development copy.
 
 It currently provides:
 
@@ -116,6 +118,24 @@ Add it to HACS as a **custom repository** of type **Integration**:
 HACS installs the integration from `custom_components/copilot_bridge`.
 
 The add-on directory remains in the same repository for manual add-on/repository use, but HACS itself is not installing the add-on as part of the integration flow.
+
+## Add-on Store installation
+
+You can now add this repository directly from the Home Assistant **Add-ons** area:
+
+1. Open **Settings -> Add-ons**
+2. Open the **Add-on Store**
+3. Open the menu in the top right and choose **Repositories**
+4. Add:
+   `https://github.com/amantux/ha-copilot-bridge`
+5. Refresh the store if needed
+6. Find and install **Copilot Bridge**
+
+This works because the add-on now exists in a root-level repository app folder:
+
+`copilot_bridge/`
+
+That layout is the easiest shape for Home Assistant’s add-on repository scanner to detect.
 
 ## Home Assistant add-on configuration
 
