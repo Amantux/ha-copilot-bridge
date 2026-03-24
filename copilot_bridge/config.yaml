@@ -1,18 +1,20 @@
 name: "Copilot Bridge"
 description: "Local GitHub Copilot bridge service for Home Assistant"
 version: "0.1.0"
-slug: "copilot_bridge"
+slug: "copilot-bridge"
 init: false
 startup: services
 boot: auto
+ingress: true
+ingress_port: 8099
+panel_title: "Copilot Bridge"
+panel_icon: "mdi:robot-outline"
+watchdog: "http://[HOST]:[PORT:8099]/health"
+url: "https://github.com/amantux/ha-copilot-bridge"
 arch:
   - aarch64
   - amd64
   - armv7
-ports:
-  8099/tcp: 8099
-ports_description:
-  8099/tcp: "Copilot bridge API"
 map:
   - config:rw
 options:
@@ -20,6 +22,13 @@ options:
   github_token: ""
   github_oauth_client_id: ""
   github_oauth_scopes: "read:user"
+  assistant_profile: "home_assistant_read_only_advisor"
+  read_only_mode: true
+  allow_home_assistant_actions: false
+  allow_filesystem_access: false
+  enable_integration_discovery: true
+  enable_hacs_discovery: true
+  enable_tooling_discovery: true
   enable_home_assistant_mcp: false
   home_assistant_mcp_url: ""
   home_assistant_mcp_api_key: ""
@@ -30,9 +39,15 @@ schema:
   github_token: password?
   github_oauth_client_id: str?
   github_oauth_scopes: str?
+  assistant_profile: str?
+  read_only_mode: bool?
+  allow_home_assistant_actions: bool?
+  allow_filesystem_access: bool?
+  enable_integration_discovery: bool?
+  enable_hacs_discovery: bool?
+  enable_tooling_discovery: bool?
   enable_home_assistant_mcp: bool?
   home_assistant_mcp_url: str?
   home_assistant_mcp_api_key: password?
   allowed_paths: str
   log_level: list(trace|debug|info|warning|error)?
-

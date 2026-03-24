@@ -3,17 +3,32 @@
     "step": {
       "user": {
         "title": "Connect to Copilot Bridge",
-        "description": "Connect Home Assistant to the local Copilot bridge service.",
+        "description": "Connect Home Assistant to the local Copilot bridge service and choose how GitHub access should be handled.",
         "data": {
           "url": "Bridge URL",
           "api_key": "API key",
+          "github_auth_method": "GitHub access method",
+          "github_auth_scopes": "GitHub OAuth scopes",
           "use_home_assistant_mcp": "Use Home Assistant MCP server",
           "home_assistant_mcp_server_name": "Home Assistant MCP server name"
         }
+      },
+      "manual_token": {
+        "title": "Set GitHub token",
+        "description": "Provide a GitHub token to validate and store on the bridge.",
+        "data": {
+          "token": "GitHub token"
+        }
+      },
+      "github_device_flow": {
+        "title": "Authorize GitHub device flow",
+        "description": "Open {verification_uri} and enter code {user_code}. Requested scopes: {scope}. After authorizing, submit again to continue. Current status: {status_message}"
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to the bridge service"
+      "cannot_connect": "Failed to connect to the bridge service",
+      "invalid_auth": "Failed to validate the GitHub token",
+      "device_flow_error": "GitHub device flow could not be completed"
     },
     "abort": {
       "already_configured": "This bridge is already configured"

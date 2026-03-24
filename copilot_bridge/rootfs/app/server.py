@@ -17,6 +17,25 @@ GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
 GITHUB_OAUTH_SCOPES = os.getenv("GITHUB_OAUTH_SCOPES", "read:user").strip()
 PORT = int(os.getenv("BRIDGE_PORT", "8099"))
 ALLOWED_PATHS = os.getenv("ALLOWED_PATHS", "/config")
+ASSISTANT_PROFILE = os.getenv(
+    "ASSISTANT_PROFILE", "home_assistant_read_only_advisor"
+).strip() or "home_assistant_read_only_advisor"
+READ_ONLY_MODE = os.getenv("READ_ONLY_MODE", "true").strip().lower() == "true"
+ALLOW_HOME_ASSISTANT_ACTIONS = (
+    os.getenv("ALLOW_HOME_ASSISTANT_ACTIONS", "false").strip().lower() == "true"
+)
+ALLOW_FILESYSTEM_ACCESS = (
+    os.getenv("ALLOW_FILESYSTEM_ACCESS", "false").strip().lower() == "true"
+)
+ENABLE_INTEGRATION_DISCOVERY = (
+    os.getenv("ENABLE_INTEGRATION_DISCOVERY", "true").strip().lower() == "true"
+)
+ENABLE_HACS_DISCOVERY = (
+    os.getenv("ENABLE_HACS_DISCOVERY", "true").strip().lower() == "true"
+)
+ENABLE_TOOLING_DISCOVERY = (
+    os.getenv("ENABLE_TOOLING_DISCOVERY", "true").strip().lower() == "true"
+)
 ENABLE_HOME_ASSISTANT_MCP = (
     os.getenv("ENABLE_HOME_ASSISTANT_MCP", "false").strip().lower() == "true"
 )
@@ -163,7 +182,61 @@ def _auth_status_payload() -> dict[str, Any]:
                 "has_api_key": bool(HOME_ASSISTANT_MCP_API_KEY),
             }
         },
+        "assistant_policy": _default_assistant_policy(),
     }
+
+
+def _default_assistant_policy() -> dict[str, Any]:
+    return {
+        "assistant_profile": ASSISTANT_PROFILE,
+        "read_only_mode": READ_ONLY_MODE,
+        "allow_home_assistant_actions": ALLOW_HOME_ASSISTANT_ACTIONS,
+        "allow_filesystem_access": ALLOW_FILESYSTEM_ACCESS,
+        "enable_integration_discovery": ENABLE_INTEGRATION_DISCOVERY,
+        "enable_hacs_discovery": ENABLE_HACS_DISCOVERY,
+        "enable_tooling_discovery": ENABLE_TOOLING_DISCOVERY,
+    }
+
+
+def _effective_assistant_policy(requested_policy: dict[str, Any] | None) -> dict[str, Any]:
+    policy = _default_assistant_policy()
+    if isinstance(requested_policy, dict):
+        for key in (
+            "assistant_profile",
+            "read_only_mode",
+            "allow_home_assistant_actions",
+            "allow_filesystem_access",
+            "enable_integration_discovery",
+            "enable_hacs_discovery",
+            "enable_tooling_discovery",
+        ):
+            if key in requested_policy:
+                policy[key] = requested_policy[key]
+
+    if policy.get("read_only_mode", True):
+        policy["allow_home_assistant_actions"] = False
+        policy["allow_filesystem_access"] = False
+
+    policy["allow_filesystem_access"] = False
+    return policy
+
+
+def _build_system_prompt(policy: dict[str, Any]) -> str:
+    capabilities: list[str] = []
+    if policy.get("enable_integration_discovery"):
+        capabilities.append("official Home Assistant integrations")
+    if policy.get("enable_hacs_discovery"):
+        capabilities.append("HACS integrations, add-ons, and cards")
+    if policy.get("enable_tooling_discovery"):
+        capabilities.append("general Home Assistant tooling and operational guidance")
+
+    capability_text = ", ".join(capabilities) if capabilities else "general guidance"
+    return (
+        "You are a Home Assistant advisor focused on intent understanding and read-only guidance. "
+        f"You may recommend {capability_text}. "
+        "Do not modify the filesystem, do not execute host commands, and do not claim to perform actions you cannot verify. "
+        "Prefer recommendations, configuration guidance, setup steps, and safe next actions."
+    )
 
 
 def _read_json_response(http_response: Any) -> dict[str, Any]:
@@ -446,6 +519,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "service": "copilot_bridge",
                     "version": "0.1.0",
                     "allowed_paths": ALLOWED_PATHS,
+                    "assistant_policy": _default_assistant_policy(),
                     "github_auth": {
                         "oauth_client_configured": bool(GITHUB_OAUTH_CLIENT_ID),
                     },
@@ -519,6 +593,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
             requested_home_assistant_mcp = bool(
                 payload.get("use_home_assistant_mcp", ENABLE_HOME_ASSISTANT_MCP)
             )
+            assistant_policy = _effective_assistant_policy(
+                payload.get("assistant_policy")
+            )
             home_assistant_mcp_server_name = str(
                 payload.get("home_assistant_mcp_server_name", "home_assistant")
             ).strip() or "home_assistant"
@@ -538,9 +615,25 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {
                     "response": (
-                        "Bridge scaffold is running. This request came through the "
+                        "Bridge scaffold is running in read-only advisor mode. "
+                        "This request came through the "
                         f"{source} path"
                         + (f" in {language}" if language else "")
+                        + (
+                            " The bridge is configured to recommend official integrations."
+                            if assistant_policy["enable_integration_discovery"]
+                            else ""
+                        )
+                        + (
+                            " It can also recommend HACS add-ons, integrations, and cards."
+                            if assistant_policy["enable_hacs_discovery"]
+                            else ""
+                        )
+                        + (
+                            " It can include general Home Assistant tooling suggestions."
+                            if assistant_policy["enable_tooling_discovery"]
+                            else ""
+                        )
                         + (
                             " with the Home Assistant MCP server enabled."
                             if home_assistant_mcp_active
@@ -559,7 +652,13 @@ class BridgeHandler(BaseHTTPRequestHandler):
                                 else " GitHub auth is not configured yet."
                             )
                         )
-                        + ". Replace this stub with a real Copilot execution pipeline."
+                        + " Filesystem modification is disabled."
+                        + (
+                            " Home Assistant actions are disabled."
+                            if not assistant_policy["allow_home_assistant_actions"]
+                            else ""
+                        )
+                        + " Replace this stub with a real Copilot execution pipeline."
                     ),
                     "session_id": session_id or conversation_id or "default",
                     "conversation_id": conversation_id or session_id or "default",
@@ -569,6 +668,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "authenticated": bool(github.get("access_token")),
                     "auth_mode": github.get("source") if github.get("access_token") else "none",
                     "github_user": github.get("user"),
+                    "assistant_policy": assistant_policy,
+                    "system_prompt": _build_system_prompt(assistant_policy),
                     "mcp": {
                         "home_assistant": {
                             "requested": requested_home_assistant_mcp,

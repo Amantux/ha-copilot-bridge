@@ -24,6 +24,7 @@ It currently provides:
 - service registration for prompts and auth actions
 - support for Assistant text chat and Assist voice ingress
 - optional request-level Home Assistant MCP enablement
+- integration setup-time GitHub access method selection
 
 ### Add-on bridge
 
@@ -38,7 +39,9 @@ It currently provides:
 - GitHub device flow support
 - manual token validation and storage
 - stubbed `/api/ask` behavior for end-to-end wiring
+- a read-only advisor policy profile for Home Assistant recommendation workflows
 - optional Home Assistant MCP configuration fields
+- ingress-based UI access through Home Assistant without publishing a LAN port
 
 ## Current status
 
@@ -51,6 +54,7 @@ What is implemented:
 - one shared path for Assistant chat and voice requests
 - bridge-side GitHub auth workflow
 - optional Home Assistant MCP request signaling
+- read-only advisor defaults for integration discovery, HACS discovery, and tooling guidance
 
 What is not implemented yet:
 
@@ -119,6 +123,12 @@ HACS installs the integration from `custom_components/copilot_bridge`.
 
 The add-on directory remains in the same repository for manual add-on/repository use, but HACS itself is not installing the add-on as part of the integration flow.
 
+The integration defaults to the internal bridge URL:
+
+`http://copilot-bridge:8099`
+
+which is intended for Home Assistant internal networking rather than direct LAN exposure.
+
 ## Add-on Store installation
 
 You can now add this repository directly from the Home Assistant **Add-ons** area:
@@ -137,6 +147,16 @@ This works because the add-on now exists in a root-level repository app folder:
 
 That layout is the easiest shape for Home Assistant’s add-on repository scanner to detect.
 
+### Network exposure
+
+The add-on is configured to be **internal-only**:
+
+- it does **not** publish host ports to your LAN
+- it uses Home Assistant **Ingress** for UI access
+- the integration talks to the add-on over the internal hostname `copilot-bridge`
+
+That means the bridge is intended to be reachable only from the Home Assistant host/container environment, not directly from other machines on your network.
+
 ## Home Assistant add-on configuration
 
 The scaffolded add-on exposes the following options:
@@ -146,6 +166,13 @@ bridge_api_key: ""
 github_token: ""
 github_oauth_client_id: ""
 github_oauth_scopes: "read:user"
+assistant_profile: "home_assistant_read_only_advisor"
+read_only_mode: true
+allow_home_assistant_actions: false
+allow_filesystem_access: false
+enable_integration_discovery: true
+enable_hacs_discovery: true
+enable_tooling_discovery: true
 enable_home_assistant_mcp: false
 home_assistant_mcp_url: ""
 home_assistant_mcp_api_key: ""
@@ -159,14 +186,45 @@ log_level: "info"
 - `github_token`: fallback GitHub token if you want static token auth
 - `github_oauth_client_id`: required for GitHub device flow
 - `github_oauth_scopes`: default scopes requested during device flow
+- `assistant_profile`: bridge-side assistant profile identifier
+- `read_only_mode`: forces advisor-style, non-action behavior
+- `allow_home_assistant_actions`: currently kept off by default and forced off in read-only mode
+- `allow_filesystem_access`: forced off so the bridge does not modify the host filesystem
+- `enable_integration_discovery`: allow recommendations for official HA integrations
+- `enable_hacs_discovery`: allow recommendations for HACS integrations, cards, and add-ons
+- `enable_tooling_discovery`: allow recommendations for Home Assistant tooling and operational helpers
 - `enable_home_assistant_mcp`: enables HA MCP by default for bridge requests
 - `home_assistant_mcp_url`: MCP endpoint for Home Assistant
 - `home_assistant_mcp_api_key`: optional secret for the MCP endpoint
 - `allowed_paths`: future allowlist for local bridge execution scope
 
+### Access model
+
+The bridge is meant to be used in two ways:
+
+- through **Home Assistant Ingress** in the Add-ons area
+- through the Home Assistant integration over the internal hostname `copilot-bridge`
+
+It is **not** intended to expose a direct host port.
+
+## Read-only advisor mode
+
+The current bridge scaffold is biased toward **intent understanding and safe recommendations**, not host modification.
+
+By default it is configured to:
+
+- recommend official Home Assistant integrations
+- recommend HACS integrations, cards, and add-ons
+- suggest general Home Assistant tooling or setup approaches
+- avoid filesystem modification
+- avoid host command execution
+- avoid claiming it completed actions it did not actually perform
+
+The integration now sends this advisor policy with prompt requests, and the bridge returns the effective policy in stub responses so you can validate the behavior shape before wiring in a real execution backend.
+
 ## Bridge API
 
-The scaffolded add-on currently exposes:
+The scaffolded add-on currently exposes these internal HTTP endpoints:
 
 - `GET /health`
 - `GET /auth/status`
@@ -179,6 +237,13 @@ The scaffolded add-on currently exposes:
 ### API behavior today
 
 `POST /api/ask` is still stubbed. It returns a structured response so Home Assistant-side plumbing can be tested before real Copilot execution is integrated.
+
+That stubbed response now also includes:
+
+- `assistant_policy`
+- `system_prompt`
+
+so you can inspect the effective read-only advisor posture during integration testing.
 
 ## Home Assistant services
 
@@ -213,6 +278,17 @@ Use these to manage auth from Home Assistant:
 - `copilot_bridge.set_github_token`
 - `copilot_bridge.clear_github_auth`
 
+### Integration setup auth selection
+
+During integration configuration, you can now choose a GitHub access method up front:
+
+- `addon_config`
+- `device_flow`
+- `manual_token`
+- `none`
+
+That selected method is stored with the integration entry so the access mode is part of integration configuration, not just follow-up service calls.
+
 ## GitHub authentication workflow
 
 The project currently supports two auth paths:
@@ -233,6 +309,8 @@ Sequence:
 3. Enter the returned `user_code`
 4. Call `copilot_bridge.poll_github_device_flow` until it returns `authorized`
 
+You can also start this during the integration config flow by selecting `device_flow`.
+
 ### Option 2: Manual token
 
 Best when you already have a PAT or other GitHub token.
@@ -242,6 +320,8 @@ Sequence:
 1. Call `copilot_bridge.set_github_token`
 2. The bridge validates it against `https://api.github.com/user`
 3. If valid, the token is stored in the bridge auth state
+
+You can also complete this during integration setup by selecting `manual_token`.
 
 ### Persistence
 

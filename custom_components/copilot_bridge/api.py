@@ -16,12 +16,26 @@ class CopilotBridgeApiClient:
         *,
         base_url: str,
         api_key: str | None,
+        assistant_profile: str,
+        read_only_mode: bool,
+        allow_home_assistant_actions: bool,
+        allow_filesystem_access: bool,
+        enable_integration_discovery: bool,
+        enable_hacs_discovery: bool,
+        enable_tooling_discovery: bool,
         use_home_assistant_mcp: bool = False,
         home_assistant_mcp_server_name: str | None = None,
         session: aiohttp.ClientSession,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._assistant_profile = assistant_profile
+        self._read_only_mode = read_only_mode
+        self._allow_home_assistant_actions = allow_home_assistant_actions
+        self._allow_filesystem_access = allow_filesystem_access
+        self._enable_integration_discovery = enable_integration_discovery
+        self._enable_hacs_discovery = enable_hacs_discovery
+        self._enable_tooling_discovery = enable_tooling_discovery
         self._use_home_assistant_mcp = use_home_assistant_mcp
         self._home_assistant_mcp_server_name = home_assistant_mcp_server_name
         self._session = session
@@ -96,6 +110,15 @@ class CopilotBridgeApiClient:
             payload["home_assistant_mcp_server_name"] = (
                 resolved_home_assistant_mcp_server_name
             )
+        payload["assistant_policy"] = {
+            "assistant_profile": self._assistant_profile,
+            "read_only_mode": self._read_only_mode,
+            "allow_home_assistant_actions": self._allow_home_assistant_actions,
+            "allow_filesystem_access": self._allow_filesystem_access,
+            "enable_integration_discovery": self._enable_integration_discovery,
+            "enable_hacs_discovery": self._enable_hacs_discovery,
+            "enable_tooling_discovery": self._enable_tooling_discovery,
+        }
 
         return await self._request("POST", "/api/ask", json_payload=payload)
 

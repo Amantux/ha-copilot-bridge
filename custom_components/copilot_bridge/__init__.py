@@ -13,10 +13,24 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import CopilotBridgeApiClient, CopilotBridgeApiError
 from .const import (
+    CONF_ALLOW_FILESYSTEM_ACCESS,
+    CONF_ALLOW_HOME_ASSISTANT_ACTIONS,
+    CONF_ASSISTANT_PROFILE,
+    CONF_ENABLE_HACS_DISCOVERY,
+    CONF_ENABLE_INTEGRATION_DISCOVERY,
+    CONF_ENABLE_TOOLING_DISCOVERY,
     CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
+    CONF_READ_ONLY_MODE,
     CONF_USE_HOME_ASSISTANT_MCP,
     DATA_AGENT,
     DATA_CLIENT,
+    DEFAULT_ALLOW_FILESYSTEM_ACCESS,
+    DEFAULT_ALLOW_HOME_ASSISTANT_ACTIONS,
+    DEFAULT_ASSISTANT_PROFILE,
+    DEFAULT_ENABLE_HACS_DISCOVERY,
+    DEFAULT_ENABLE_INTEGRATION_DISCOVERY,
+    DEFAULT_ENABLE_TOOLING_DISCOVERY,
+    DEFAULT_READ_ONLY_MODE,
     DEFAULT_URL,
     DOMAIN,
     SERVICE_CLEAR_GITHUB_AUTH,
@@ -138,6 +152,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = CopilotBridgeApiClient(
         base_url=entry.data.get(CONF_URL, DEFAULT_URL),
         api_key=entry.data.get(CONF_API_KEY),
+        assistant_profile=entry.data.get(
+            CONF_ASSISTANT_PROFILE, DEFAULT_ASSISTANT_PROFILE
+        ),
+        read_only_mode=entry.data.get(CONF_READ_ONLY_MODE, DEFAULT_READ_ONLY_MODE),
+        allow_home_assistant_actions=entry.data.get(
+            CONF_ALLOW_HOME_ASSISTANT_ACTIONS, DEFAULT_ALLOW_HOME_ASSISTANT_ACTIONS
+        ),
+        allow_filesystem_access=entry.data.get(
+            CONF_ALLOW_FILESYSTEM_ACCESS, DEFAULT_ALLOW_FILESYSTEM_ACCESS
+        ),
+        enable_integration_discovery=entry.data.get(
+            CONF_ENABLE_INTEGRATION_DISCOVERY, DEFAULT_ENABLE_INTEGRATION_DISCOVERY
+        ),
+        enable_hacs_discovery=entry.data.get(
+            CONF_ENABLE_HACS_DISCOVERY, DEFAULT_ENABLE_HACS_DISCOVERY
+        ),
+        enable_tooling_discovery=entry.data.get(
+            CONF_ENABLE_TOOLING_DISCOVERY, DEFAULT_ENABLE_TOOLING_DISCOVERY
+        ),
         use_home_assistant_mcp=entry.data.get(CONF_USE_HOME_ASSISTANT_MCP, False),
         home_assistant_mcp_server_name=entry.data.get(
             CONF_HOME_ASSISTANT_MCP_SERVER_NAME
