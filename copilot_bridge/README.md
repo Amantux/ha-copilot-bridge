@@ -37,6 +37,7 @@ Configure these fields as needed:
 - `enable_tooling_discovery`
 - `enable_home_assistant_mcp`
 - `home_assistant_mcp_url`
+- `home_assistant_mcp_bearer_token`
 - `home_assistant_mcp_api_key`
 
 ## Typical install flow
@@ -67,4 +68,6 @@ The default posture is intentionally read-only:
 - filesystem access is disabled
 - Home Assistant action execution is disabled in read-only mode
 - recommendation scope is aimed at official integrations, HACS content, and general HA tooling
+
+For Home Assistant MCP add-on compatibility, prefer the full secret MCP URL from the HA MCP add-on logs and leave the bearer token empty unless you are using a custom MCP deployment that explicitly requires token-based auth.
 

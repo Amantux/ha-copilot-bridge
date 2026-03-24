@@ -14,6 +14,7 @@ export ENABLE_HACS_DISCOVERY="$(bashio::config 'enable_hacs_discovery')"
 export ENABLE_TOOLING_DISCOVERY="$(bashio::config 'enable_tooling_discovery')"
 export ENABLE_HOME_ASSISTANT_MCP="$(bashio::config 'enable_home_assistant_mcp')"
 export HOME_ASSISTANT_MCP_URL="$(bashio::config 'home_assistant_mcp_url')"
+export HOME_ASSISTANT_MCP_BEARER_TOKEN="$(bashio::config 'home_assistant_mcp_bearer_token')"
 export HOME_ASSISTANT_MCP_API_KEY="$(bashio::config 'home_assistant_mcp_api_key')"
 export ALLOWED_PATHS="$(bashio::config 'allowed_paths')"
 

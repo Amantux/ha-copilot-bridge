@@ -9,6 +9,20 @@ import aiohttp
 class CopilotBridgeApiError(Exception):
     """Raised when the Copilot bridge API request fails."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
+        self.details = details or {}
+
 
 class CopilotBridgeApiClient:
     def __init__(
@@ -146,8 +160,14 @@ class CopilotBridgeApiClient:
             raise CopilotBridgeApiError(str(err)) from err
 
         if response.status >= 400:
-            message = data.get("error", f"HTTP {response.status}")
-            raise CopilotBridgeApiError(str(message))
+            message = str(data.get("message") or data.get("error") or f"HTTP {response.status}")
+            code = data.get("error")
+            raise CopilotBridgeApiError(
+                message,
+                status=response.status,
+                code=str(code) if isinstance(code, str) else None,
+                details=data,
+            )
 
         return data
 

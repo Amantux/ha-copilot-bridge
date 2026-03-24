@@ -44,6 +44,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     _entry_data: dict[str, Any]
     _client: CopilotBridgeApiClient | None = None
     _device_flow_details: dict[str, Any] | None = None
+    _github_auth_status: dict[str, Any] | None = None
 
     async def async_step_user(self, user_input: dict | None = None):
         errors: dict[str, str] = {}
@@ -56,6 +57,13 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             client = CopilotBridgeApiClient(
                 base_url=user_input[CONF_URL],
                 api_key=user_input.get(CONF_API_KEY),
+                assistant_profile=DEFAULT_ASSISTANT_PROFILE,
+                read_only_mode=DEFAULT_READ_ONLY_MODE,
+                allow_home_assistant_actions=DEFAULT_ALLOW_HOME_ASSISTANT_ACTIONS,
+                allow_filesystem_access=DEFAULT_ALLOW_FILESYSTEM_ACCESS,
+                enable_integration_discovery=DEFAULT_ENABLE_INTEGRATION_DISCOVERY,
+                enable_hacs_discovery=DEFAULT_ENABLE_HACS_DISCOVERY,
+                enable_tooling_discovery=DEFAULT_ENABLE_TOOLING_DISCOVERY,
                 use_home_assistant_mcp=user_input.get(CONF_USE_HOME_ASSISTANT_MCP, False),
                 home_assistant_mcp_server_name=user_input.get(
                     CONF_HOME_ASSISTANT_MCP_SERVER_NAME
@@ -94,16 +102,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     DEFAULT_ENABLE_TOOLING_DISCOVERY,
                 )
                 self._client = client
-
-                auth_method = user_input.get(
-                    CONF_GITHUB_AUTH_METHOD, DEFAULT_GITHUB_AUTH_METHOD
-                )
-                if auth_method == AUTH_METHOD_MANUAL_TOKEN:
-                    return await self.async_step_manual_token()
-                if auth_method == AUTH_METHOD_DEVICE_FLOW:
-                    return await self.async_step_github_device_flow()
-
-                return self._async_create_bridge_entry()
+                return await self.async_step_github_config()
 
         return self.async_show_form(
             step_id="user",
@@ -111,18 +110,6 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_URL, default=DEFAULT_URL): str,
                     vol.Optional(CONF_API_KEY): str,
-                    vol.Required(
-                        CONF_GITHUB_AUTH_METHOD,
-                        default=DEFAULT_GITHUB_AUTH_METHOD,
-                    ): vol.In(
-                        [
-                            AUTH_METHOD_ADDON_CONFIG,
-                            AUTH_METHOD_DEVICE_FLOW,
-                            AUTH_METHOD_MANUAL_TOKEN,
-                            AUTH_METHOD_NONE,
-                        ]
-                    ),
-                    vol.Optional(CONF_GITHUB_AUTH_SCOPES, default="read:user"): str,
                     vol.Optional(CONF_USE_HOME_ASSISTANT_MCP, default=False): bool,
                     vol.Optional(
                         CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
@@ -133,11 +120,57 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_manual_token(self, user_input: dict | None = None):
+    async def async_step_github_config(self, user_input: dict | None = None):
         errors: dict[str, str] = {}
 
         if self._client is None:
             return await self.async_step_user()
+
+        self._github_auth_status = await self._async_fetch_github_auth_status()
+        github_authenticated = bool(
+            self._github_auth_status and self._github_auth_status.get("authenticated")
+        )
+
+        if user_input is not None:
+            self._entry_data[CONF_GITHUB_AUTH_METHOD] = user_input.get(
+                CONF_GITHUB_AUTH_METHOD, DEFAULT_GITHUB_AUTH_METHOD
+            )
+            self._entry_data[CONF_GITHUB_AUTH_SCOPES] = user_input.get(
+                CONF_GITHUB_AUTH_SCOPES, "read:user"
+            )
+            reuse_existing_auth = bool(user_input.get("reuse_existing_auth", True))
+
+            auth_method = self._entry_data[CONF_GITHUB_AUTH_METHOD]
+            if (
+                auth_method == AUTH_METHOD_DEVICE_FLOW
+                and not reuse_existing_auth
+                and not (
+                    self._github_auth_status
+                    and self._github_auth_status.get("oauth_client_configured")
+                )
+            ):
+                errors["base"] = "device_flow_not_available"
+            elif github_authenticated and reuse_existing_auth:
+                return self._async_create_bridge_entry()
+
+            if errors:
+                return self._show_github_config_form(errors)
+
+            if auth_method == AUTH_METHOD_MANUAL_TOKEN:
+                return await self.async_step_manual_token()
+            if auth_method == AUTH_METHOD_DEVICE_FLOW:
+                self._device_flow_details = None
+                return await self.async_step_github_device_flow()
+
+            return self._async_create_bridge_entry()
+
+        return self._show_github_config_form(errors)
+
+    async def async_step_manual_token(self, user_input: dict | None = None):
+        errors: dict[str, str] = {}
+
+        if self._client is None:
+            return await self.async_step_github_config()
 
         if user_input is not None:
             try:
@@ -157,26 +190,35 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if self._client is None:
-            return await self.async_step_user()
+            return await self.async_step_github_config()
 
         status_message = "Open the verification URL and enter the user code."
 
         if self._device_flow_details is None:
-            try:
-                self._device_flow_details = (
-                    await self._client.async_start_github_device_flow(
-                        scopes=self._entry_data.get(CONF_GITHUB_AUTH_SCOPES)
+            pending_device_flow = None
+            if self._github_auth_status:
+                pending_device_flow = self._github_auth_status.get("pending_device_flow")
+
+            if pending_device_flow:
+                self._device_flow_details = pending_device_flow
+                status_message = "A GitHub device authorization is already pending."
+            else:
+                try:
+                    self._device_flow_details = (
+                        await self._client.async_start_github_device_flow(
+                            scopes=self._entry_data.get(CONF_GITHUB_AUTH_SCOPES)
+                        )
                     )
-                )
-            except CopilotBridgeApiError:
-                errors["base"] = "device_flow_error"
+                except CopilotBridgeApiError as err:
+                    errors["base"] = "device_flow_error"
+                    status_message = err.message
 
         if not errors and user_input is not None:
             try:
                 result = await self._client.async_poll_github_device_flow()
             except CopilotBridgeApiError as err:
                 errors["base"] = "device_flow_error"
-                status_message = str(err)
+                status_message = err.message
             else:
                 if result.get("status") == "authorized":
                     return self._async_create_bridge_entry()
@@ -204,6 +246,80 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "status_message": status_message,
             },
         )
+
+    async def _async_fetch_github_auth_status(self) -> dict[str, Any] | None:
+        if self._client is None:
+            return None
+
+        try:
+            return await self._client.async_auth_status()
+        except CopilotBridgeApiError:
+            return None
+
+    def _show_github_config_form(self, errors: dict[str, str]):
+        github_status = self._github_auth_status or {}
+        current_status = self._format_github_auth_status(github_status)
+        oauth_client_status = (
+            "Configured"
+            if github_status.get("oauth_client_configured")
+            else "Not configured"
+        )
+
+        schema_fields: dict[Any, Any] = {
+            vol.Required(
+                CONF_GITHUB_AUTH_METHOD,
+                default=self._entry_data.get(
+                    CONF_GITHUB_AUTH_METHOD, DEFAULT_GITHUB_AUTH_METHOD
+                ),
+            ): vol.In(
+                [
+                    AUTH_METHOD_ADDON_CONFIG,
+                    AUTH_METHOD_DEVICE_FLOW,
+                    AUTH_METHOD_MANUAL_TOKEN,
+                    AUTH_METHOD_NONE,
+                ]
+            ),
+            vol.Optional(
+                CONF_GITHUB_AUTH_SCOPES,
+                default=self._entry_data.get(CONF_GITHUB_AUTH_SCOPES, "read:user"),
+            ): str,
+        }
+        if github_status.get("authenticated"):
+            schema_fields[vol.Optional("reuse_existing_auth", default=True)] = bool
+
+        return self.async_show_form(
+            step_id="github_config",
+            data_schema=vol.Schema(schema_fields),
+            errors=errors,
+            description_placeholders={
+                "current_status": current_status,
+                "oauth_client_status": oauth_client_status,
+            },
+        )
+
+    def _format_github_auth_status(self, github_status: dict[str, Any]) -> str:
+        if not github_status:
+            return "Auth status could not be loaded from the bridge."
+
+        if github_status.get("authenticated"):
+            user = github_status.get("user") or {}
+            login = user.get("login") or "unknown user"
+            auth_mode = github_status.get("auth_mode", "unknown")
+            scope = github_status.get("scope") or "unknown scopes"
+            return f"Already authenticated as {login} via {auth_mode} with {scope}."
+
+        pending = github_status.get("pending_device_flow")
+        if pending:
+            return (
+                "A device flow is already pending. "
+                f"Code: {pending.get('user_code', 'Unavailable')}."
+            )
+
+        last_error = github_status.get("last_error") or {}
+        if last_error.get("message"):
+            return f"Not authenticated. Last bridge error: {last_error['message']}"
+
+        return "Not authenticated yet."
 
     def _async_create_bridge_entry(self):
         return self.async_create_entry(

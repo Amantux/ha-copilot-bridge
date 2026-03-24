@@ -40,6 +40,9 @@ ENABLE_HOME_ASSISTANT_MCP = (
     os.getenv("ENABLE_HOME_ASSISTANT_MCP", "false").strip().lower() == "true"
 )
 HOME_ASSISTANT_MCP_URL = os.getenv("HOME_ASSISTANT_MCP_URL", "").strip()
+HOME_ASSISTANT_MCP_BEARER_TOKEN = os.getenv(
+    "HOME_ASSISTANT_MCP_BEARER_TOKEN", ""
+).strip()
 HOME_ASSISTANT_MCP_API_KEY = os.getenv("HOME_ASSISTANT_MCP_API_KEY", "").strip()
 AUTH_STATE_PATH = Path(
     os.getenv("GITHUB_AUTH_STATE_PATH", "/config/copilot_bridge_github_auth.json")
@@ -130,6 +133,29 @@ AUTH_LOCK = threading.Lock()
 AUTH_STATE = _load_auth_state()
 
 
+def _resolved_home_assistant_mcp_bearer_token() -> str:
+    return HOME_ASSISTANT_MCP_BEARER_TOKEN or HOME_ASSISTANT_MCP_API_KEY
+
+
+def _home_assistant_mcp_uses_private_url() -> bool:
+    if not HOME_ASSISTANT_MCP_URL:
+        return False
+    try:
+        return "/private_" in parse.urlparse(HOME_ASSISTANT_MCP_URL).path
+    except ValueError:
+        return "/private_" in HOME_ASSISTANT_MCP_URL
+
+
+def _home_assistant_mcp_auth_mode() -> str:
+    if _home_assistant_mcp_uses_private_url():
+        return "secret_url"
+    if _resolved_home_assistant_mcp_bearer_token():
+        return "bearer_token"
+    if HOME_ASSISTANT_MCP_URL:
+        return "url_only"
+    return "none"
+
+
 def _persist_auth_state_unlocked() -> None:
     AUTH_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     AUTH_STATE_PATH.write_text(json.dumps(AUTH_STATE, indent=2), encoding="utf-8")
@@ -154,7 +180,7 @@ def _clear_pending_device_flow(last_error: dict[str, Any] | None = None) -> dict
 
 
 def _auth_status_payload() -> dict[str, Any]:
-    github = _get_github_state()
+    github = _enrich_github_state_if_needed()
     pending = github.get("pending_device_flow")
     pending_public = None
     if pending:
@@ -179,7 +205,9 @@ def _auth_status_payload() -> dict[str, Any]:
             "home_assistant": {
                 "enabled_by_default": ENABLE_HOME_ASSISTANT_MCP,
                 "configured": bool(HOME_ASSISTANT_MCP_URL),
-                "has_api_key": bool(HOME_ASSISTANT_MCP_API_KEY),
+                "auth_mode": _home_assistant_mcp_auth_mode(),
+                "uses_private_url": _home_assistant_mcp_uses_private_url(),
+                "has_bearer_token": bool(_resolved_home_assistant_mcp_bearer_token()),
             }
         },
         "assistant_policy": _default_assistant_policy(),
@@ -249,6 +277,14 @@ def _read_json_response(http_response: Any) -> dict[str, Any]:
     return data
 
 
+def _read_json_response_with_headers(
+    http_response: Any,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    return _read_json_response(http_response), {
+        str(key).lower(): str(value) for key, value in http_response.headers.items()
+    }
+
+
 def _github_post_form(url: str, data: dict[str, str]) -> dict[str, Any]:
     encoded = parse.urlencode(data).encode("utf-8")
     req = request.Request(
@@ -311,14 +347,71 @@ def _github_get_json(url: str, token: str) -> dict[str, Any]:
         raise GitHubApiError(502, "network_error", str(err.reason)) from err
 
 
-def _fetch_github_user(token: str) -> dict[str, Any]:
-    user = _github_get_json("https://api.github.com/user", token)
-    return {
-        "login": user.get("login"),
-        "id": user.get("id"),
-        "name": user.get("name"),
-        "html_url": user.get("html_url"),
-    }
+def _github_get_json_with_headers(
+    url: str, token: str
+) -> tuple[dict[str, Any], dict[str, str]]:
+    req = request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "ha-copilot-bridge/0.1.0",
+        },
+        method="GET",
+    )
+    try:
+        with request.urlopen(req, timeout=15) as response:
+            return _read_json_response_with_headers(response)
+    except error.HTTPError as err:
+        try:
+            payload = _read_json_response(err)
+        except (ValueError, json.JSONDecodeError):
+            payload = {}
+        raise GitHubApiError(
+            err.code,
+            str(payload.get("error", "github_http_error")),
+            str(payload.get("message") or err.reason),
+            payload=payload,
+        ) from err
+    except error.URLError as err:
+        raise GitHubApiError(502, "network_error", str(err.reason)) from err
+
+
+def _fetch_github_user(token: str) -> tuple[dict[str, Any], str | None]:
+    user, headers = _github_get_json_with_headers("https://api.github.com/user", token)
+    return (
+        {
+            "login": user.get("login"),
+            "id": user.get("id"),
+            "name": user.get("name"),
+            "html_url": user.get("html_url"),
+        },
+        (headers.get("x-oauth-scopes", "").strip() or None),
+    )
+
+
+def _enrich_github_state_if_needed() -> dict[str, Any]:
+    github = _get_github_state()
+    access_token = github.get("access_token")
+    if not access_token:
+        return github
+
+    if github.get("user") and github.get("scope") is not None:
+        return github
+
+    try:
+        user, scope = _fetch_github_user(str(access_token))
+    except GitHubApiError as err:
+        return _update_github_state(
+            last_error={"code": err.code, "message": err.message}
+        )
+
+    updates: dict[str, Any] = {"last_error": None}
+    if not github.get("user"):
+        updates["user"] = user
+    if github.get("scope") is None:
+        updates["scope"] = scope
+    return _update_github_state(**updates)
 
 
 def _start_device_flow(scopes: str | None) -> dict[str, Any]:
@@ -444,11 +537,11 @@ def _poll_device_flow() -> dict[str, Any]:
     access_token = str(result["access_token"])
     token_type = str(result.get("token_type", "bearer"))
     scope = str(result.get("scope", "") or pending.get("scope", ""))
-    user = _fetch_github_user(access_token)
+    user, fetched_scope = _fetch_github_user(access_token)
     _update_github_state(
         access_token=access_token,
         token_type=token_type,
-        scope=scope,
+        scope=scope or fetched_scope,
         source="device_flow",
         user=user,
         pending_device_flow=None,
@@ -472,11 +565,11 @@ def _set_github_token(token: str) -> dict[str, Any]:
             "A GitHub token is required.",
         )
 
-    user = _fetch_github_user(token)
+    user, scope = _fetch_github_user(token)
     _update_github_state(
         access_token=token,
         token_type="bearer",
-        scope=None,
+        scope=scope,
         source="manual_token",
         user=user,
         pending_device_flow=None,
@@ -527,6 +620,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         "home_assistant": {
                             "enabled_by_default": ENABLE_HOME_ASSISTANT_MCP,
                             "configured": bool(HOME_ASSISTANT_MCP_URL),
+                            "auth_mode": _home_assistant_mcp_auth_mode(),
+                            "uses_private_url": _home_assistant_mcp_uses_private_url(),
                         }
                     },
                 },
@@ -675,6 +770,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
                             "requested": requested_home_assistant_mcp,
                             "active": home_assistant_mcp_active,
                             "configured": bool(HOME_ASSISTANT_MCP_URL),
+                            "auth_mode": _home_assistant_mcp_auth_mode(),
+                            "uses_private_url": _home_assistant_mcp_uses_private_url(),
+                            "has_bearer_token": bool(
+                                _resolved_home_assistant_mcp_bearer_token()
+                            ),
                             "server_name": home_assistant_mcp_server_name,
                         }
                     },

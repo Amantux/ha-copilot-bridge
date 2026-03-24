@@ -31,6 +31,7 @@ options:
   enable_tooling_discovery: true
   enable_home_assistant_mcp: false
   home_assistant_mcp_url: ""
+  home_assistant_mcp_bearer_token: ""
   home_assistant_mcp_api_key: ""
   allowed_paths: "/config"
   log_level: "info"
@@ -48,6 +49,7 @@ schema:
   enable_tooling_discovery: bool?
   enable_home_assistant_mcp: bool?
   home_assistant_mcp_url: str?
+  home_assistant_mcp_bearer_token: password?
   home_assistant_mcp_api_key: password?
   allowed_paths: str
   log_level: list(trace|debug|info|warning|error)?
