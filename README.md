@@ -125,7 +125,7 @@ The add-on directory remains in the same repository for manual add-on/repository
 
 The integration defaults to the internal bridge URL:
 
-`http://copilot-bridge:8099`
+`http://home-assistant-copilot-bridge:8099`
 
 which is intended for Home Assistant internal networking rather than direct LAN exposure.
 
@@ -153,7 +153,7 @@ The add-on is configured to be **internal-only**:
 
 - it does **not** publish host ports to your LAN
 - it uses Home Assistant **Ingress** for UI access
-- the integration talks to the add-on over the internal hostname `copilot-bridge`
+- the integration talks to the add-on over the internal hostname `home-assistant-copilot-bridge`
 
 That means the bridge is intended to be reachable only from the Home Assistant host/container environment, not directly from other machines on your network.
 
@@ -203,7 +203,7 @@ log_level: "info"
 The bridge is meant to be used in two ways:
 
 - through **Home Assistant Ingress** in the Add-ons area
-- through the Home Assistant integration over the internal hostname `copilot-bridge`
+- through the Home Assistant integration over the internal hostname `home-assistant-copilot-bridge`
 
 It is **not** intended to expose a direct host port.
 

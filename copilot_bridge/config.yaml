@@ -1,7 +1,7 @@
 name: "Copilot Bridge"
 description: "Local GitHub Copilot bridge service for Home Assistant"
 version: "0.1.0"
-slug: "copilot-bridge"
+slug: "home-assistant-copilot-bridge"
 init: false
 startup: services
 boot: auto

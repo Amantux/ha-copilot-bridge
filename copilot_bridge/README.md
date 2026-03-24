@@ -54,7 +54,7 @@ This add-on is configured for **internal-only access**:
 
 - no published host port
 - Home Assistant **Ingress** is enabled
-- the integration is expected to use the internal hostname `copilot-bridge`
+- the integration is expected to use the internal hostname `home-assistant-copilot-bridge`
 
 That keeps the bridge reachable from the Home Assistant server environment while avoiding direct network exposure to other devices on your LAN.
 

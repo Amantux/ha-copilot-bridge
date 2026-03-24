@@ -1,5 +1,5 @@
 DOMAIN = "copilot_bridge"
-DEFAULT_URL = "http://copilot-bridge:8099"
+DEFAULT_URL = "http://home-assistant-copilot-bridge:8099"
 SERVICE_ASK = "ask"
 SERVICE_GET_GITHUB_AUTH_STATUS = "get_github_auth_status"
 SERVICE_START_GITHUB_DEVICE_FLOW = "start_github_device_flow"
