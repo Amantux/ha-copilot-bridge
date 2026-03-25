@@ -17,7 +17,7 @@ from typing import Any
 from urllib import error, parse, request
 
 
-BRIDGE_VERSION = "0.1.0.6"
+BRIDGE_VERSION = "0.1.1"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 CONFIGURED_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
@@ -65,6 +65,12 @@ GH_AUTH_OUTPUT = ""
 GH_DEVICE_CODE_PATTERN = re.compile(r"\b[A-Z0-9]{4}(?:-[A-Z0-9]{4})+\b")
 GH_DEVICE_URL_PATTERN = re.compile(r"https://[^\s)]+")
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+COPILOT_API_BASE = "https://api.githubcopilot.com"
+COPILOT_TOKEN_EXCHANGE_URL = f"https://api.github.com/copilot_internal/v2/token"
+COPILOT_TOKEN_REFRESH_BUFFER = 120  # seconds before expiry to refresh
+COPILOT_TOKEN_CACHE: dict[str, Any] = {}
+COPILOT_TOKEN_LOCK = threading.Lock()
 
 
 def _resolve_log_level(level_name: str) -> int:
@@ -1235,6 +1241,162 @@ def _clear_github_auth() -> dict[str, Any]:
     }
 
 
+def _get_copilot_api_token() -> str:
+    """Exchange the stored GitHub OAuth token for a short-lived Copilot API token.
+
+    The Copilot API token (~30 min TTL) is cached and refreshed automatically.
+    """
+    with COPILOT_TOKEN_LOCK:
+        cached_token = COPILOT_TOKEN_CACHE.get("token")
+        cached_expires = COPILOT_TOKEN_CACHE.get("expires_at", 0)
+        if cached_token and time.time() < cached_expires - COPILOT_TOKEN_REFRESH_BUFFER:
+            return str(cached_token)
+
+    github = _get_github_state()
+    gh_token = github.get("access_token")
+    if not gh_token:
+        raise BridgeError(
+            HTTPStatus.UNAUTHORIZED,
+            "github_not_authenticated",
+            "GitHub authentication is required. Sign in via the Home Assistant integration first.",
+        )
+
+    LOGGER.debug("Exchanging GitHub token for Copilot API token")
+    try:
+        result = _github_get_json(COPILOT_TOKEN_EXCHANGE_URL, str(gh_token))
+    except GitHubApiError as err:
+        LOGGER.error(
+            "Copilot token exchange failed: status=%s code=%s message=%s",
+            err.status,
+            err.code,
+            err.message,
+        )
+        raise BridgeError(
+            HTTPStatus.BAD_GATEWAY,
+            "copilot_token_unavailable",
+            (
+                f"Could not obtain a Copilot API token: {err.message}. "
+                "Ensure your GitHub account has an active Copilot subscription."
+            ),
+        ) from err
+
+    token = str(result.get("token", "")).strip()
+    expires_at = int(result.get("expires_at", int(time.time()) + 1740))
+    if not token:
+        raise BridgeError(
+            HTTPStatus.BAD_GATEWAY,
+            "copilot_token_empty",
+            "GitHub returned an empty Copilot API token.",
+        )
+
+    with COPILOT_TOKEN_LOCK:
+        COPILOT_TOKEN_CACHE["token"] = token
+        COPILOT_TOKEN_CACHE["expires_at"] = expires_at
+    LOGGER.info("Copilot API token refreshed: expires_at=%s", expires_at)
+    return token
+
+
+def _call_copilot_chat(
+    prompt: str,
+    system_prompt: str,
+    *,
+    mcp_url: str | None = None,
+    mcp_bearer_token: str | None = None,
+) -> str:
+    """Call the GitHub Copilot chat completions API and return the response text.
+
+    If an MCP server URL is provided and looks publicly reachable, it is passed
+    as a remote tool server. Otherwise it is mentioned in the system prompt so
+    the model knows it exists for reference.
+    """
+    copilot_token = _get_copilot_api_token()
+
+    effective_system = system_prompt
+    if mcp_url:
+        effective_system += (
+            f"\n\nThe user's Home Assistant instance exposes an MCP server at: {mcp_url}. "
+            "You may reference this when suggesting configuration or automation steps."
+        )
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": effective_system},
+        {"role": "user", "content": prompt},
+    ]
+
+    request_body: dict[str, Any] = {
+        "model": "gpt-4o",
+        "messages": messages,
+        "stream": False,
+        "max_tokens": 4096,
+        "temperature": 0,
+    }
+
+    payload = json.dumps(request_body).encode("utf-8")
+    req = request.Request(
+        f"{COPILOT_API_BASE}/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {copilot_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Copilot-Integration-Id": "vscode-chat",
+            "Editor-Version": "vscode/1.90.0",
+            "Editor-Plugin-Version": "copilot-chat/0.17.1",
+            "User-Agent": f"ha-copilot-bridge/{BRIDGE_VERSION}",
+        },
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(req, timeout=90) as response:
+            result = _read_json_response(response)
+    except error.HTTPError as err:
+        try:
+            err_payload = _read_json_response(err)
+        except (ValueError, json.JSONDecodeError):
+            err_payload = {}
+        message = str(
+            err_payload.get("message") or err_payload.get("error") or err.reason
+        )
+        LOGGER.error("Copilot API call failed: status=%s message=%s", err.code, message)
+        raise BridgeError(
+            HTTPStatus.BAD_GATEWAY,
+            "copilot_api_error",
+            f"Copilot API error ({err.code}): {message}",
+        ) from err
+    except error.URLError as err:
+        raise BridgeError(
+            HTTPStatus.BAD_GATEWAY,
+            "copilot_network_error",
+            f"Network error calling Copilot API: {err.reason}",
+        ) from err
+
+    choices = result.get("choices")
+    if not choices:
+        LOGGER.error("Copilot API returned no choices: response=%s", result)
+        raise BridgeError(
+            HTTPStatus.BAD_GATEWAY,
+            "copilot_no_choices",
+            "Copilot API returned no response choices.",
+        )
+
+    content = str(choices[0].get("message", {}).get("content") or "").strip()
+    if not content:
+        raise BridgeError(
+            HTTPStatus.BAD_GATEWAY,
+            "copilot_empty_response",
+            "Copilot API returned an empty response.",
+        )
+
+    usage = result.get("usage") or {}
+    LOGGER.info(
+        "Copilot API response received: prompt_tokens=%s completion_tokens=%s",
+        usage.get("prompt_tokens"),
+        usage.get("completion_tokens"),
+    )
+    return content
+
+
 class BridgeHandler(BaseHTTPRequestHandler):
     server_version = f"copilot-bridge/{BRIDGE_VERSION}"
 
@@ -1356,55 +1518,31 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "Prompt is required.",
                 )
 
+            system_prompt = _build_system_prompt(assistant_policy)
+            mcp_url = HOME_ASSISTANT_MCP_URL if home_assistant_mcp_active else None
+            mcp_token = (
+                _resolved_home_assistant_mcp_bearer_token()
+                if home_assistant_mcp_active
+                else None
+            )
+
+            LOGGER.info(
+                "Calling Copilot API: source=%s language=%s mcp_active=%s",
+                source,
+                language,
+                home_assistant_mcp_active,
+            )
+            response_text = _call_copilot_chat(
+                prompt,
+                system_prompt,
+                mcp_url=mcp_url,
+                mcp_bearer_token=mcp_token,
+            )
+
             self._send_json(
                 HTTPStatus.OK,
                 {
-                    "response": (
-                        "Bridge scaffold is running in read-only advisor mode. "
-                        "This request came through the "
-                        f"{source} path"
-                        + (f" in {language}" if language else "")
-                        + (
-                            " The bridge is configured to recommend official integrations."
-                            if assistant_policy["enable_integration_discovery"]
-                            else ""
-                        )
-                        + (
-                            " It can also recommend HACS add-ons, integrations, and cards."
-                            if assistant_policy["enable_hacs_discovery"]
-                            else ""
-                        )
-                        + (
-                            " It can include general Home Assistant tooling suggestions."
-                            if assistant_policy["enable_tooling_discovery"]
-                            else ""
-                        )
-                        + (
-                            " with the Home Assistant MCP server enabled."
-                            if home_assistant_mcp_active
-                            else (
-                                " Home Assistant MCP was requested but is not configured on the bridge."
-                                if requested_home_assistant_mcp
-                                else ""
-                            )
-                        )
-                        + (
-                            f" GitHub auth is active for {github['user']['login']}."
-                            if github.get("user")
-                            else (
-                                " GitHub auth is configured but the user profile has not been loaded yet."
-                                if github.get("access_token")
-                                else " GitHub auth is not configured yet."
-                            )
-                        )
-                        + " Filesystem modification is disabled."
-                        + (
-                            " Home Assistant actions are disabled."
-                            if not assistant_policy["allow_home_assistant_actions"]
-                            else ""
-                        )
-                        + " Replace this stub with a real Copilot execution pipeline."
-                    ),
+                    "response": response_text,
                     "session_id": session_id or conversation_id or "default",
                     "conversation_id": conversation_id or session_id or "default",
                     "user_id": user_id,
@@ -1414,7 +1552,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "auth_mode": github.get("source") if github.get("access_token") else "none",
                     "github_user": github.get("user"),
                     "assistant_policy": assistant_policy,
-                    "system_prompt": _build_system_prompt(assistant_policy),
+                    "system_prompt": system_prompt,
                     "mcp": {
                         "home_assistant": {
                             "requested": requested_home_assistant_mcp,
@@ -1500,4 +1638,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

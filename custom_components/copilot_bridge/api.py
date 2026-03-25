@@ -153,7 +153,9 @@ class CopilotBridgeApiClient:
                 f"{self._base_url}{path}",
                 json=json_payload,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10),
+                timeout=aiohttp.ClientTimeout(
+                    total=120 if path == "/api/ask" else 15
+                ),
             ) as response:
                 data = await response.json(content_type=None)
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
