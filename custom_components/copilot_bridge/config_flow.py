@@ -263,7 +263,9 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if self._github_auth_status:
                 pending_device_flow = self._github_auth_status.get("pending_device_flow")
 
-            if pending_device_flow:
+            # Only reuse a pending flow if it has a valid code to show the user.
+            # A pending state with user_code=None is stale from a previous failed attempt.
+            if pending_device_flow and pending_device_flow.get("user_code"):
                 self._device_flow_details = pending_device_flow
                 status_message = "A GitHub device authorization is already pending."
             else:

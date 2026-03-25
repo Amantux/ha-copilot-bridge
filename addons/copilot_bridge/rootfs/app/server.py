@@ -17,7 +17,7 @@ from typing import Any
 from urllib import error, parse, request
 
 
-BRIDGE_VERSION = "0.1.0.4"
+BRIDGE_VERSION = "0.1.0.5"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 CONFIGURED_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
@@ -153,6 +153,16 @@ def _load_auth_state() -> dict[str, Any]:
     github.setdefault("pending_device_flow", None)
     github.setdefault("last_error", None)
     github.setdefault("updated_at", None)
+
+    # Clear stale pending flows that have no user_code — they came from a previous
+    # crashed or incomplete auth attempt and can never complete.
+    pending = github.get("pending_device_flow")
+    if pending is not None and not pending.get("user_code"):
+        LOGGER.info(
+            "Clearing stale pending device flow on startup (no user_code): backend=%s",
+            pending.get("backend"),
+        )
+        github["pending_device_flow"] = None
 
     if CONFIGURED_GITHUB_TOKEN and (
         github.get("access_token") != CONFIGURED_GITHUB_TOKEN
@@ -711,25 +721,38 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
         if GH_AUTH_PROCESS is not None and GH_AUTH_PROCESS.poll() is None:
             output = _read_gh_auth_output_unlocked()
             existing_pending = _get_github_state().get("pending_device_flow") or {}
-            pending = {
-                **existing_pending,
-                **_extract_gh_auth_details(output),
-                "backend": "gh_cli",
-                "scope": existing_pending.get("scope", requested_scopes),
-                "interval": existing_pending.get("interval", 2),
-                "last_poll_at": existing_pending.get("last_poll_at", 0),
-            }
-            LOGGER.warning(
-                "GitHub CLI browser auth already running: pid=%s has_code=%s has_url=%s",
-                GH_AUTH_PROCESS.pid,
-                bool(pending.get("user_code")),
-                bool(pending.get("verification_uri")),
-            )
-            _update_github_state(pending_device_flow=pending, last_error=None)
-            return {
-                "status": "pending",
-                **_public_pending_device_flow(pending),
-            }
+            extracted = _extract_gh_auth_details(output)
+
+            # If the running process has been going for a while but still has no code,
+            # kill it and start fresh rather than returning a permanently-null code.
+            if not extracted.get("user_code") and not existing_pending.get("user_code"):
+                LOGGER.warning(
+                    "GitHub CLI auth process running but no code captured; restarting: pid=%s",
+                    GH_AUTH_PROCESS.pid,
+                )
+                _cleanup_gh_auth_session_unlocked(stop_process=True)
+                _clear_pending_device_flow(None)
+                # fall through to start a new process below
+            else:
+                pending = {
+                    **existing_pending,
+                    **extracted,
+                    "backend": "gh_cli",
+                    "scope": existing_pending.get("scope", requested_scopes),
+                    "interval": existing_pending.get("interval", 2),
+                    "last_poll_at": existing_pending.get("last_poll_at", 0),
+                }
+                LOGGER.warning(
+                    "GitHub CLI browser auth already running: pid=%s has_code=%s has_url=%s",
+                    GH_AUTH_PROCESS.pid,
+                    bool(pending.get("user_code")),
+                    bool(pending.get("verification_uri")),
+                )
+                _update_github_state(pending_device_flow=pending, last_error=None)
+                return {
+                    "status": "pending",
+                    **_public_pending_device_flow(pending),
+                }
 
         _cleanup_gh_auth_session_unlocked(stop_process=True)
         GH_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
