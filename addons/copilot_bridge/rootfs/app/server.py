@@ -17,7 +17,7 @@ from typing import Any
 from urllib import error, parse, request
 
 
-BRIDGE_VERSION = "0.1.2"
+BRIDGE_VERSION = "0.1.3"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 CONFIGURED_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
@@ -857,6 +857,7 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
                         os.write(GH_AUTH_MASTER_FD, b"n\n")
                     except OSError:
                         pass
+            prompt_answered = True
             continue
 
         # Stage 1: answer the auth method prompt
