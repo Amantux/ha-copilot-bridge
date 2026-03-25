@@ -17,7 +17,7 @@ from typing import Any
 from urllib import error, parse, request
 
 
-BRIDGE_VERSION = "0.1.0.5"
+BRIDGE_VERSION = "0.1.0.6"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 CONFIGURED_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
@@ -757,6 +757,12 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
         _cleanup_gh_auth_session_unlocked(stop_process=True)
         GH_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         master_fd, slave_fd = pty.openpty()
+        # Use the standard interactive device code flow — the same flow used by
+        # GitHub Copilot CLI. Do NOT use --web: that forces a PKCE localhost-redirect
+        # flow which cannot complete inside a headless container. Without --web, gh
+        # shows an "authenticate" prompt, we select "Login with a web browser" (Enter),
+        # and gh switches to the GitHub device activation flow at
+        # https://github.com/login/device with a proper one-time code.
         command = [
             "gh",
             "auth",
@@ -766,7 +772,6 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
             "--git-protocol",
             "https",
             "--skip-ssh-key",
-            "--web",
             "--insecure-storage",
         ]
         if requested_scopes:
@@ -786,14 +791,16 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
         GH_AUTH_PROCESS = process
         LOGGER.info("Spawned GitHub CLI auth process: pid=%s command=%s", process.pid, command)
 
-    # Poll for the one-time code to appear in gh output before pressing Enter.
-    # gh auth login --web prints "First copy your one-time code: XXXX-XXXX" and then
-    # "Press Enter to open github.com in your browser...". We must capture the code
-    # before pressing Enter — sending Enter too early skips past code display entirely.
-    code_deadline = time.time() + 20
+    # Drive the interactive auth prompt then wait for the device code.
+    # Stage 1: gh asks "How would you like to authenticate?"
+    #          → press Enter to select "Login with a web browser" (first/default option)
+    # Stage 2: gh prints "First copy your one-time code: XXXX-XXXX"
+    #          → capture the code; press Enter so gh opens the activation URL
+    code_deadline = time.time() + 30
     output = ""
     details: dict[str, Any] = {}
-    entered = False
+    prompt_answered = False
+    code_entered = False
 
     while time.time() < code_deadline:
         time.sleep(0.5)
@@ -818,11 +825,15 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
                 message,
             )
 
-        details = _extract_gh_auth_details(output)
-        if details.get("user_code") and not entered:
+        cleaned = _sanitize_terminal_output(output)
+
+        # Stage 1: answer the auth method prompt
+        if not prompt_answered and (
+            "Login with a web browser" in cleaned
+            or "How would you like to authenticate" in cleaned
+        ):
             LOGGER.info(
-                "GitHub CLI printed one-time code after %.1fs; pressing Enter to proceed",
-                20 - (code_deadline - time.time()),
+                "Answering GitHub CLI auth prompt: selecting 'Login with a web browser'"
             )
             with GH_AUTH_LOCK:
                 if GH_AUTH_MASTER_FD is not None:
@@ -830,17 +841,35 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
                         os.write(GH_AUTH_MASTER_FD, b"\n")
                     except OSError:
                         pass
-            entered = True
-            # Read a bit more output so the verification URL is captured if gh prints it
+            prompt_answered = True
+            continue
+
+        # Stage 2: capture the device code
+        details = _extract_gh_auth_details(output)
+        if details.get("user_code") and not code_entered:
+            LOGGER.info(
+                "GitHub CLI printed device code after %.1fs; pressing Enter to open activation URL",
+                30 - (code_deadline - time.time()),
+            )
+            with GH_AUTH_LOCK:
+                if GH_AUTH_MASTER_FD is not None:
+                    try:
+                        os.write(GH_AUTH_MASTER_FD, b"\n")
+                    except OSError:
+                        pass
+            code_entered = True
+            # Read a moment longer to capture the activation URL if gh prints it
             time.sleep(1.0)
             with GH_AUTH_LOCK:
                 output = _read_gh_auth_output_unlocked()
             details = _extract_gh_auth_details(output)
             break
 
-    if not entered:
+    if not code_entered:
         LOGGER.warning(
-            "GitHub CLI did not print a device code within 20s; sending Enter anyway"
+            "GitHub CLI did not print a device code within 30s; "
+            "prompt_answered=%s — sending Enter anyway",
+            prompt_answered,
         )
         with GH_AUTH_LOCK:
             if GH_AUTH_MASTER_FD is not None:
