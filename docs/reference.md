@@ -40,6 +40,7 @@ The setup flow now also:
 - can reuse an existing authenticated GitHub session
 - blocks device flow when the add-on OAuth client is not configured
 - resumes an already pending device flow when possible
+- presents GitHub setup as an explicit guided action choice instead of a mixed settings form
 
 ## Bridge API
 

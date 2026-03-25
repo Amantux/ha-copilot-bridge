@@ -38,6 +38,9 @@ from .const import (
     DOMAIN,
 )
 
+CONF_GITHUB_AUTH_ACTION = "github_auth_action"
+ACTION_REUSE_EXISTING_AUTH = "reuse_existing_auth"
+
 
 class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
@@ -132,39 +135,64 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         if user_input is not None:
-            self._entry_data[CONF_GITHUB_AUTH_METHOD] = user_input.get(
-                CONF_GITHUB_AUTH_METHOD, DEFAULT_GITHUB_AUTH_METHOD
-            )
-            self._entry_data[CONF_GITHUB_AUTH_SCOPES] = user_input.get(
-                CONF_GITHUB_AUTH_SCOPES, "read:user"
-            )
-            reuse_existing_auth = bool(user_input.get("reuse_existing_auth", True))
+            selected_action = user_input[CONF_GITHUB_AUTH_ACTION]
 
-            auth_method = self._entry_data[CONF_GITHUB_AUTH_METHOD]
+            if selected_action == ACTION_REUSE_EXISTING_AUTH:
+                self._entry_data[CONF_GITHUB_AUTH_METHOD] = (
+                    self._resolve_existing_auth_method()
+                )
+                return self._async_create_bridge_entry()
+
+            self._entry_data[CONF_GITHUB_AUTH_METHOD] = selected_action
+
             if (
-                auth_method == AUTH_METHOD_DEVICE_FLOW
-                and not reuse_existing_auth
+                selected_action == AUTH_METHOD_DEVICE_FLOW
                 and not (
                     self._github_auth_status
                     and self._github_auth_status.get("oauth_client_configured")
                 )
             ):
                 errors["base"] = "device_flow_not_available"
-            elif github_authenticated and reuse_existing_auth:
-                return self._async_create_bridge_entry()
 
             if errors:
                 return self._show_github_config_form(errors)
 
-            if auth_method == AUTH_METHOD_MANUAL_TOKEN:
+            if selected_action == AUTH_METHOD_MANUAL_TOKEN:
                 return await self.async_step_manual_token()
-            if auth_method == AUTH_METHOD_DEVICE_FLOW:
-                self._device_flow_details = None
-                return await self.async_step_github_device_flow()
+            if selected_action == AUTH_METHOD_DEVICE_FLOW:
+                return await self.async_step_github_device_flow_options()
 
             return self._async_create_bridge_entry()
 
         return self._show_github_config_form(errors)
+
+    async def async_step_github_device_flow_options(
+        self, user_input: dict | None = None
+    ):
+        if self._client is None:
+            return await self.async_step_github_config()
+
+        if user_input is not None:
+            self._entry_data[CONF_GITHUB_AUTH_SCOPES] = user_input.get(
+                CONF_GITHUB_AUTH_SCOPES, "read:user"
+            )
+            self._device_flow_details = None
+            return await self.async_step_github_device_flow()
+
+        return self.async_show_form(
+            step_id="github_device_flow_options",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_GITHUB_AUTH_SCOPES,
+                        default=self._entry_data.get(
+                            CONF_GITHUB_AUTH_SCOPES, "read:user"
+                        ),
+                    ): str,
+                }
+            ),
+            errors={},
+        )
 
     async def async_step_manual_token(self, user_input: dict | None = None):
         errors: dict[str, str] = {}
@@ -265,31 +293,31 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else "Not configured"
         )
 
-        schema_fields: dict[Any, Any] = {
-            vol.Required(
-                CONF_GITHUB_AUTH_METHOD,
-                default=self._entry_data.get(
-                    CONF_GITHUB_AUTH_METHOD, DEFAULT_GITHUB_AUTH_METHOD
-                ),
-            ): vol.In(
-                [
-                    AUTH_METHOD_ADDON_CONFIG,
-                    AUTH_METHOD_DEVICE_FLOW,
-                    AUTH_METHOD_MANUAL_TOKEN,
-                    AUTH_METHOD_NONE,
-                ]
-            ),
-            vol.Optional(
-                CONF_GITHUB_AUTH_SCOPES,
-                default=self._entry_data.get(CONF_GITHUB_AUTH_SCOPES, "read:user"),
-            ): str,
-        }
+        action_options = [
+            (AUTH_METHOD_ADDON_CONFIG, "Use GitHub auth already configured on the add-on"),
+            (AUTH_METHOD_DEVICE_FLOW, "Sign in with GitHub in the browser"),
+            (AUTH_METHOD_MANUAL_TOKEN, "Paste a GitHub token"),
+            (AUTH_METHOD_NONE, "Skip GitHub setup for now"),
+        ]
+        default_action = self._entry_data.get(
+            CONF_GITHUB_AUTH_METHOD, DEFAULT_GITHUB_AUTH_METHOD
+        )
         if github_status.get("authenticated"):
-            schema_fields[vol.Optional("reuse_existing_auth", default=True)] = bool
+            action_options.insert(
+                0, (ACTION_REUSE_EXISTING_AUTH, "Reuse existing GitHub sign-in")
+            )
+            default_action = ACTION_REUSE_EXISTING_AUTH
 
         return self.async_show_form(
             step_id="github_config",
-            data_schema=vol.Schema(schema_fields),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_GITHUB_AUTH_ACTION,
+                        default=default_action,
+                    ): vol.In(dict(action_options)),
+                }
+            ),
             errors=errors,
             description_placeholders={
                 "current_status": current_status,
@@ -320,6 +348,16 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return f"Not authenticated. Last bridge error: {last_error['message']}"
 
         return "Not authenticated yet."
+
+    def _resolve_existing_auth_method(self) -> str:
+        auth_mode = (self._github_auth_status or {}).get("auth_mode")
+        if auth_mode == "device_flow":
+            return AUTH_METHOD_DEVICE_FLOW
+        if auth_mode == "manual_token":
+            return AUTH_METHOD_MANUAL_TOKEN
+        if auth_mode == "config_token":
+            return AUTH_METHOD_ADDON_CONFIG
+        return DEFAULT_GITHUB_AUTH_METHOD
 
     def _async_create_bridge_entry(self):
         return self.async_create_entry(

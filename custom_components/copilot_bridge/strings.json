@@ -13,11 +13,16 @@
       },
       "github_config": {
         "title": "Configure GitHub access",
-        "description": "Choose how the integration should handle GitHub access for the bridge. Current bridge status: {current_status} OAuth client status: {oauth_client_status}.",
+        "description": "Choose how you want to initialize GitHub access for the bridge. Current bridge status: {current_status} OAuth client status: {oauth_client_status}.",
         "data": {
-          "github_auth_method": "GitHub access method",
-          "github_auth_scopes": "GitHub OAuth scopes",
-          "reuse_existing_auth": "Reuse existing bridge GitHub auth"
+          "github_auth_action": "GitHub setup action"
+        }
+      },
+      "github_device_flow_options": {
+        "title": "Start GitHub sign-in",
+        "description": "Choose the GitHub OAuth scopes to request before starting browser-based sign-in.",
+        "data": {
+          "github_auth_scopes": "GitHub OAuth scopes"
         }
       },
       "manual_token": {

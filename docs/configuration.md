@@ -64,7 +64,7 @@ The project currently supports two auth paths.
 
 Inside the Home Assistant integration, GitHub configuration is now handled as its own config-flow step after the bridge connection step. That keeps bridge connectivity separate from GitHub auth selection.
 
-The integration also checks current bridge auth state during setup so it can:
+The integration also checks current bridge auth state during setup so it can guide setup more like an initialization flow. It can:
 
 - show whether the bridge is already authenticated
 - show whether the add-on OAuth client is configured for device flow
