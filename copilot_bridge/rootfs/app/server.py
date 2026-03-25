@@ -17,7 +17,7 @@ from typing import Any
 from urllib import error, parse, request
 
 
-BRIDGE_VERSION = "0.1.1"
+BRIDGE_VERSION = "0.1.2"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 CONFIGURED_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
