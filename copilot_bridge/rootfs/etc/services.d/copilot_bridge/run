@@ -17,6 +17,7 @@ export HOME_ASSISTANT_MCP_URL="$(bashio::config 'home_assistant_mcp_url')"
 export HOME_ASSISTANT_MCP_BEARER_TOKEN="$(bashio::config 'home_assistant_mcp_bearer_token')"
 export HOME_ASSISTANT_MCP_API_KEY="$(bashio::config 'home_assistant_mcp_api_key')"
 export ALLOWED_PATHS="$(bashio::config 'allowed_paths')"
+export LOG_LEVEL="$(bashio::config 'log_level')"
 
 exec python3 /app/server.py
 
