@@ -25,18 +25,25 @@ Supported fields:
 
 ## Integration setup flow
 
-The setup now explicitly tests the bridge connection after the initial connection settings step.
+The setup now follows a staged sequence instead of a single mixed form:
+
+1. connect to the bridge
+2. verify bridge health
+3. complete GitHub auth
+4. configure Home Assistant MCP separately
 
 That bridge test step surfaces a few basic details from `/health`, including:
 
 - bridge service name
 - bridge version
-- whether the add-on GitHub OAuth client is configured
+- whether the bridge GitHub OAuth client is configured
+- whether a bridge-configured GitHub token is present
+- where bridge auth state will be stored
 - whether Home Assistant MCP is configured on the bridge
 
 ## Integration setup auth selection
 
-During integration configuration, the user now reaches a dedicated GitHub configuration step after the initial bridge connection step. In that GitHub step, the user can choose:
+During integration configuration, the user now reaches a dedicated GitHub configuration step before any MCP-specific choices. In that GitHub step, the user can choose:
 
 - `addon_config`
 - `device_flow`
@@ -49,9 +56,17 @@ The setup flow now also:
 
 - inspects current bridge auth state
 - can reuse an existing authenticated GitHub session
-- blocks device flow when the add-on OAuth client is not configured
+- blocks device flow when the bridge OAuth client is not configured
+- blocks the "use bridge-configured auth" path when the bridge does not actually have a configured token
 - resumes an already pending device flow when possible
 - presents GitHub setup as an explicit guided action choice instead of a mixed settings form
+
+## Integration setup MCP configuration
+
+After GitHub setup completes, the user reaches a separate MCP configuration step. That step controls:
+
+- whether Home Assistant MCP should be requested by default
+- the MCP server name to reference from bridge requests
 
 ## Bridge API
 
@@ -64,6 +79,22 @@ The scaffolded add-on currently exposes:
 - `POST /auth/token`
 - `POST /auth/logout`
 - `POST /api/ask`
+
+`GET /health` now includes redacted bridge GitHub auth metadata such as:
+
+- `oauth_client_configured`
+- `configured_token_present`
+- `default_scopes`
+- `storage.path`
+- `storage.file_exists`
+- `storage.directory_writable`
+- `storage.load_error`
+
+`GET /auth/status` includes the runtime auth view plus:
+
+- `configured_token_present`
+- `can_start_device_flow`
+- `storage`
 
 ## `/api/ask` behavior
 

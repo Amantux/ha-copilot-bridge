@@ -101,6 +101,37 @@ Typical flow:
 
 The bridge stores auth state on the Home Assistant config volume so it survives add-on restarts.
 
+### Standalone container auth
+
+For a standalone container deployment, the same bridge auth workflow is available through environment variables and the bridge auth endpoints.
+
+Recommended environment variables:
+
+- `BRIDGE_API_KEY`: optional shared secret for the integration
+- `GITHUB_TOKEN`: static GitHub token to use at startup
+- `GITHUB_OAUTH_CLIENT_ID`: enables GitHub device flow without requiring a client secret
+- `GITHUB_OAUTH_SCOPES`: default requested scopes for device flow
+- `GITHUB_AUTH_STATE_PATH`: file path where device-flow or pasted-token auth state is persisted
+
+Container recommendations:
+
+- mount a persistent volume and place `GITHUB_AUTH_STATE_PATH` inside it
+- use `GITHUB_TOKEN` when you want immutable operator-managed credentials
+- use `GITHUB_OAUTH_CLIENT_ID` plus `GITHUB_AUTH_STATE_PATH` when you want browser-assisted login from the Home Assistant integration
+
+Startup precedence:
+
+- if `GITHUB_TOKEN` is set, the bridge now treats that configured token as the active auth source on startup
+- if `GITHUB_TOKEN` is not set, the bridge falls back to persisted auth state from `GITHUB_AUTH_STATE_PATH`
+
+The bridge now exposes redacted auth-storage metadata in `/health` and `/auth/status` so you can confirm:
+
+- whether a configured GitHub token is present
+- whether device flow can start
+- where auth state is expected to persist
+- whether the auth-state file already exists
+- whether persisted auth failed to load
+
 ## MCP configuration split
 
 The MCP configuration split is intentional:

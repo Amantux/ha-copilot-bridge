@@ -68,10 +68,8 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 enable_integration_discovery=DEFAULT_ENABLE_INTEGRATION_DISCOVERY,
                 enable_hacs_discovery=DEFAULT_ENABLE_HACS_DISCOVERY,
                 enable_tooling_discovery=DEFAULT_ENABLE_TOOLING_DISCOVERY,
-                use_home_assistant_mcp=user_input.get(CONF_USE_HOME_ASSISTANT_MCP, False),
-                home_assistant_mcp_server_name=user_input.get(
-                    CONF_HOME_ASSISTANT_MCP_SERVER_NAME
-                ),
+                use_home_assistant_mcp=False,
+                home_assistant_mcp_server_name=DEFAULT_HOME_ASSISTANT_MCP_SERVER_NAME,
                 session=async_get_clientsession(self.hass),
             )
 
@@ -105,6 +103,11 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_ENABLE_TOOLING_DISCOVERY,
                     DEFAULT_ENABLE_TOOLING_DISCOVERY,
                 )
+                self._entry_data.setdefault(CONF_USE_HOME_ASSISTANT_MCP, False)
+                self._entry_data.setdefault(
+                    CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
+                    DEFAULT_HOME_ASSISTANT_MCP_SERVER_NAME,
+                )
                 self._client = client
                 return await self.async_step_bridge_connection_test()
 
@@ -114,11 +117,6 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_URL, default=DEFAULT_URL): str,
                     vol.Optional(CONF_API_KEY): str,
-                    vol.Optional(CONF_USE_HOME_ASSISTANT_MCP, default=False): bool,
-                    vol.Optional(
-                        CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
-                        default=DEFAULT_HOME_ASSISTANT_MCP_SERVER_NAME,
-                    ): str,
                 }
             ),
             errors=errors,
@@ -134,6 +132,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         health = self._bridge_health or {}
         github_auth = health.get("github_auth") or {}
         mcp = ((health.get("mcp") or {}).get("home_assistant") or {})
+        storage = github_auth.get("storage") or {}
         return self.async_show_form(
             step_id="bridge_connection_test",
             data_schema=vol.Schema({}),
@@ -146,6 +145,12 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if github_auth.get("oauth_client_configured")
                     else "Not configured"
                 ),
+                "github_token_status": (
+                    "Configured"
+                    if github_auth.get("configured_token_present")
+                    else "Not configured"
+                ),
+                "github_auth_storage": self._format_auth_storage_status(storage),
                 "mcp_status": (
                     "Configured"
                     if mcp.get("configured")
@@ -161,20 +166,24 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_user()
 
         self._github_auth_status = await self._async_fetch_github_auth_status()
-        github_authenticated = bool(
-            self._github_auth_status and self._github_auth_status.get("authenticated")
-        )
 
         if user_input is not None:
             selected_action = user_input[CONF_GITHUB_AUTH_ACTION]
+            bridge_has_configured_token = bool(
+                self._github_auth_status
+                and self._github_auth_status.get("configured_token_present")
+            )
 
             if selected_action == ACTION_REUSE_EXISTING_AUTH:
                 self._entry_data[CONF_GITHUB_AUTH_METHOD] = (
                     self._resolve_existing_auth_method()
                 )
-                return self._async_create_bridge_entry()
+                return await self.async_step_mcp_config()
 
             self._entry_data[CONF_GITHUB_AUTH_METHOD] = selected_action
+
+            if selected_action == AUTH_METHOD_ADDON_CONFIG and not bridge_has_configured_token:
+                errors["base"] = "bridge_auth_not_configured"
 
             if (
                 selected_action == AUTH_METHOD_DEVICE_FLOW
@@ -193,7 +202,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if selected_action == AUTH_METHOD_DEVICE_FLOW:
                 return await self.async_step_github_device_flow_options()
 
-            return self._async_create_bridge_entry()
+            return await self.async_step_mcp_config()
 
         return self._show_github_config_form(errors)
 
@@ -237,7 +246,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except CopilotBridgeApiError:
                 errors["base"] = "invalid_auth"
             else:
-                return self._async_create_bridge_entry()
+                return await self.async_step_mcp_config()
 
         return self.async_show_form(
             step_id="manual_token",
@@ -280,7 +289,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 status_message = err.message
             else:
                 if result.get("status") == "authorized":
-                    return self._async_create_bridge_entry()
+                    return await self.async_step_mcp_config()
                 status_message = str(
                     result.get("message", "Authorization is still pending.")
                 )
@@ -306,6 +315,40 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    async def async_step_mcp_config(self, user_input: dict | None = None):
+        if self._client is None:
+            return await self.async_step_user()
+
+        if user_input is not None:
+            self._entry_data[CONF_USE_HOME_ASSISTANT_MCP] = user_input.get(
+                CONF_USE_HOME_ASSISTANT_MCP, False
+            )
+            self._entry_data[CONF_HOME_ASSISTANT_MCP_SERVER_NAME] = user_input.get(
+                CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
+                DEFAULT_HOME_ASSISTANT_MCP_SERVER_NAME,
+            )
+            return self._async_create_bridge_entry()
+
+        return self.async_show_form(
+            step_id="mcp_config",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_USE_HOME_ASSISTANT_MCP,
+                        default=self._entry_data.get(CONF_USE_HOME_ASSISTANT_MCP, False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
+                        default=self._entry_data.get(
+                            CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
+                            DEFAULT_HOME_ASSISTANT_MCP_SERVER_NAME,
+                        ),
+                    ): str,
+                }
+            ),
+            errors={},
+        )
+
     async def _async_fetch_github_auth_status(self) -> dict[str, Any] | None:
         if self._client is None:
             return None
@@ -323,9 +366,17 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if github_status.get("oauth_client_configured")
             else "Not configured"
         )
+        configured_token_status = (
+            "Configured"
+            if github_status.get("configured_token_present")
+            else "Not configured"
+        )
+        auth_storage_status = self._format_auth_storage_status(
+            github_status.get("storage") or {}
+        )
 
         action_options = [
-            (AUTH_METHOD_ADDON_CONFIG, "Use GitHub auth already configured on the add-on"),
+            (AUTH_METHOD_ADDON_CONFIG, "Use GitHub auth already configured on the bridge"),
             (AUTH_METHOD_DEVICE_FLOW, "Sign in with GitHub in the browser"),
             (AUTH_METHOD_MANUAL_TOKEN, "Paste a GitHub token"),
             (AUTH_METHOD_NONE, "Skip GitHub setup for now"),
@@ -353,6 +404,8 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "current_status": current_status,
                 "oauth_client_status": oauth_client_status,
+                "configured_token_status": configured_token_status,
+                "auth_storage_status": auth_storage_status,
             },
         )
 
@@ -362,6 +415,12 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if github_status.get("authenticated"):
             user = github_status.get("user") or {}
+            if not user.get("login"):
+                auth_mode = github_status.get("auth_mode", "unknown")
+                return (
+                    "GitHub auth is configured on the bridge via "
+                    f"{auth_mode}, but the user profile has not been loaded yet."
+                )
             login = user.get("login") or "unknown user"
             auth_mode = github_status.get("auth_mode", "unknown")
             scope = github_status.get("scope") or "unknown scopes"
@@ -378,7 +437,23 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if last_error.get("message"):
             return f"Not authenticated. Last bridge error: {last_error['message']}"
 
+        if github_status.get("configured_token_present"):
+            return "A GitHub token is configured on the bridge and will be used after validation."
+
         return "Not authenticated yet."
+
+    def _format_auth_storage_status(self, storage: dict[str, Any]) -> str:
+        if not storage:
+            return "Unknown"
+
+        path = storage.get("path") or "unknown path"
+        if storage.get("load_error"):
+            return f"Load error for {path}: {storage['load_error']}"
+        if storage.get("file_exists"):
+            return f"Ready at {path}"
+        if storage.get("directory_writable"):
+            return f"Will persist to {path}"
+        return f"Not writable at {path}"
 
     def _resolve_existing_auth_method(self) -> str:
         auth_mode = (self._github_auth_status or {}).get("auth_mode")

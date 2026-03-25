@@ -15,6 +15,7 @@ The add-on runs a local bridge service that:
 - exposes a local API on port `8099`
 - stores GitHub auth state on the HA config volume
 - supports GitHub device flow and manual token auth
+- can also be run as a standalone container with environment-based GitHub auth
 - accepts prompt requests from the Home Assistant integration
 - defaults to a read-only advisor profile for Home Assistant guidance
 - optionally carries Home Assistant MCP configuration
@@ -62,6 +63,12 @@ That keeps the bridge reachable from the Home Assistant server environment while
 ## Notes
 
 The bridge is currently scaffolded: auth and request plumbing are present, but the final Copilot runtime execution layer is still to be implemented.
+
+For standalone container deployments, use:
+
+- `GITHUB_TOKEN` for operator-managed static auth
+- `GITHUB_OAUTH_CLIENT_ID` for GitHub device flow
+- `GITHUB_AUTH_STATE_PATH` on a mounted volume for persisted auth state
 
 The default posture is intentionally read-only:
 

@@ -47,6 +47,7 @@ HOME_ASSISTANT_MCP_API_KEY = os.getenv("HOME_ASSISTANT_MCP_API_KEY", "").strip()
 AUTH_STATE_PATH = Path(
     os.getenv("GITHUB_AUTH_STATE_PATH", "/config/copilot_bridge_github_auth.json")
 )
+AUTH_STATE_LOAD_ERROR: str | None = None
 
 
 class BridgeError(Exception):
@@ -101,14 +102,16 @@ def _default_auth_state() -> dict[str, Any]:
 
 
 def _load_auth_state() -> dict[str, Any]:
+    global AUTH_STATE_LOAD_ERROR
     state = _default_auth_state()
     if AUTH_STATE_PATH.exists():
         try:
             loaded = json.loads(AUTH_STATE_PATH.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 state.update(loaded)
-        except (OSError, json.JSONDecodeError):
-            pass
+            AUTH_STATE_LOAD_ERROR = None
+        except (OSError, json.JSONDecodeError) as err:
+            AUTH_STATE_LOAD_ERROR = f"Failed to load persisted GitHub auth state: {err}"
 
     github = state.setdefault("github", {})
     github.setdefault("access_token", None)
@@ -120,10 +123,17 @@ def _load_auth_state() -> dict[str, Any]:
     github.setdefault("last_error", None)
     github.setdefault("updated_at", None)
 
-    if CONFIGURED_GITHUB_TOKEN and not github.get("access_token"):
+    if CONFIGURED_GITHUB_TOKEN and (
+        github.get("access_token") != CONFIGURED_GITHUB_TOKEN
+        or github.get("source") != "config_token"
+    ):
         github["access_token"] = CONFIGURED_GITHUB_TOKEN
         github["token_type"] = "bearer"
+        github["scope"] = None
         github["source"] = "config_token"
+        github["user"] = None
+        github["pending_device_flow"] = None
+        github["last_error"] = None
         github["updated_at"] = int(time.time())
 
     return state
@@ -157,8 +167,31 @@ def _home_assistant_mcp_auth_mode() -> str:
 
 
 def _persist_auth_state_unlocked() -> None:
-    AUTH_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    AUTH_STATE_PATH.write_text(json.dumps(AUTH_STATE, indent=2), encoding="utf-8")
+    try:
+        AUTH_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        AUTH_STATE_PATH.write_text(json.dumps(AUTH_STATE, indent=2), encoding="utf-8")
+    except OSError as err:
+        raise BridgeError(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            "auth_state_persist_failed",
+            f"Could not persist GitHub auth state to {AUTH_STATE_PATH}: {err}",
+        ) from err
+
+
+def _auth_storage_payload() -> dict[str, Any]:
+    directory = AUTH_STATE_PATH.parent
+    writable_target = directory
+    while not writable_target.exists() and writable_target != writable_target.parent:
+        writable_target = writable_target.parent
+
+    return {
+        "path": str(AUTH_STATE_PATH),
+        "file_exists": AUTH_STATE_PATH.exists(),
+        "directory": str(directory),
+        "directory_exists": directory.exists(),
+        "directory_writable": os.access(writable_target, os.W_OK),
+        "load_error": AUTH_STATE_LOAD_ERROR,
+    }
 
 
 def _get_github_state() -> dict[str, Any]:
@@ -196,11 +229,14 @@ def _auth_status_payload() -> dict[str, Any]:
         "authenticated": bool(github.get("access_token")),
         "auth_mode": github.get("source") if github.get("access_token") else "none",
         "oauth_client_configured": bool(GITHUB_OAUTH_CLIENT_ID),
+        "configured_token_present": bool(CONFIGURED_GITHUB_TOKEN),
+        "can_start_device_flow": bool(GITHUB_OAUTH_CLIENT_ID),
         "default_scopes": GITHUB_OAUTH_SCOPES,
         "user": github.get("user"),
         "scope": github.get("scope"),
         "pending_device_flow": pending_public,
         "last_error": github.get("last_error"),
+        "storage": _auth_storage_payload(),
         "mcp": {
             "home_assistant": {
                 "enabled_by_default": ENABLE_HOME_ASSISTANT_MCP,
@@ -615,6 +651,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "assistant_policy": _default_assistant_policy(),
                     "github_auth": {
                         "oauth_client_configured": bool(GITHUB_OAUTH_CLIENT_ID),
+                        "configured_token_present": bool(CONFIGURED_GITHUB_TOKEN),
+                        "default_scopes": GITHUB_OAUTH_SCOPES,
+                        "storage": _auth_storage_payload(),
                     },
                     "mcp": {
                         "home_assistant": {

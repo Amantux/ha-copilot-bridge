@@ -42,6 +42,30 @@ The add-on is configured for internal-only access:
 
 That means the bridge is intended to be reachable from the Home Assistant host/container environment, not directly from other devices on your LAN.
 
+## Standalone container installation
+
+The bridge can also run as a plain container outside the Home Assistant add-on system.
+
+Example:
+
+```bash
+docker run --name copilot-bridge \
+  -p 8099:8099 \
+  -e BRIDGE_API_KEY=change-me \
+  -e GITHUB_OAUTH_CLIENT_ID=your_github_oauth_app_client_id \
+  -e GITHUB_OAUTH_SCOPES=read:user \
+  -e GITHUB_AUTH_STATE_PATH=/data/github-auth.json \
+  -v copilot-bridge-data:/data \
+  your-built-image-tag
+```
+
+Notes:
+
+- publish port `8099` only if Home Assistant needs to reach the container over your Docker network or host
+- mount a persistent volume and point `GITHUB_AUTH_STATE_PATH` into it so device-flow and pasted-token auth survive restarts
+- if you prefer a static token, set `GITHUB_TOKEN` instead of using device flow
+- if Home Assistant runs in Docker too, use a shared Docker network and configure the integration with the container hostname instead of `localhost`
+
 ## Installation order
 
 Recommended sequence:
@@ -50,4 +74,5 @@ Recommended sequence:
 2. Start and configure the add-on.
 3. Install the integration through HACS.
 4. Add the integration in Home Assistant and use the bridge connection test step to verify the local bridge responds.
-5. Continue through GitHub auth and optional MCP-related settings.
+5. Complete the dedicated GitHub auth step.
+6. Complete the separate MCP configuration step if you want MCP enabled.

@@ -6,18 +6,16 @@
         "description": "Connect Home Assistant to the local Copilot bridge service. Submitting this step tests the bridge connection.",
         "data": {
           "url": "Bridge URL",
-          "api_key": "API key",
-          "use_home_assistant_mcp": "Use Home Assistant MCP server",
-          "home_assistant_mcp_server_name": "Home Assistant MCP server name"
+          "api_key": "API key"
         }
       },
       "bridge_connection_test": {
         "title": "Bridge connection tested",
-        "description": "Bridge connection succeeded. Service: {service}. Version: {version}. GitHub OAuth client: {github_oauth_client_status}. Home Assistant MCP: {mcp_status}. Submit to continue."
+        "description": "Bridge connection succeeded. Service: {service}. Version: {version}. GitHub OAuth client: {github_oauth_client_status}. GitHub token: {github_token_status}. Auth storage: {github_auth_storage}. Home Assistant MCP: {mcp_status}. Submit to continue."
       },
       "github_config": {
         "title": "Configure GitHub access",
-        "description": "Choose how you want to initialize GitHub access for the bridge. Current bridge status: {current_status} OAuth client status: {oauth_client_status}.",
+        "description": "Choose how you want to initialize GitHub access for the bridge. Current bridge status: {current_status} OAuth client status: {oauth_client_status}. Configured bridge token: {configured_token_status}. Auth storage: {auth_storage_status}.",
         "data": {
           "github_auth_action": "GitHub setup action"
         }
@@ -39,13 +37,22 @@
       "github_device_flow": {
         "title": "Authorize GitHub device flow",
         "description": "Open {verification_uri} and enter code {user_code}. Requested scopes: {scope}. After authorizing, submit again to continue. Current status: {status_message}"
+      },
+      "mcp_config": {
+        "title": "Configure Home Assistant MCP",
+        "description": "Configure MCP after GitHub setup. Enable it only if this bridge should request the Home Assistant MCP server for prompts.",
+        "data": {
+          "use_home_assistant_mcp": "Use Home Assistant MCP server",
+          "home_assistant_mcp_server_name": "Home Assistant MCP server name"
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to the bridge service",
       "invalid_auth": "Failed to validate the GitHub token",
       "device_flow_error": "GitHub device flow could not be completed",
-      "device_flow_not_available": "GitHub device flow is not available because the add-on OAuth client is not configured"
+      "device_flow_not_available": "GitHub device flow is not available because the bridge OAuth client is not configured",
+      "bridge_auth_not_configured": "GitHub auth is not configured on the bridge yet"
     },
     "abort": {
       "already_configured": "This bridge is already configured"

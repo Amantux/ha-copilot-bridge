@@ -61,6 +61,21 @@ For the add-on:
 3. Start the add-on.
 4. Keep the integration pointed at `http://home-assistant-copilot-bridge:8099`.
 
+For a standalone container:
+
+```bash
+docker run --name copilot-bridge \
+  -p 8099:8099 \
+  -e BRIDGE_API_KEY=change-me \
+  -e GITHUB_OAUTH_CLIENT_ID=your_github_oauth_app_client_id \
+  -e GITHUB_OAUTH_SCOPES=read:user \
+  -e GITHUB_AUTH_STATE_PATH=/data/github-auth.json \
+  -v copilot-bridge-data:/data \
+  your-built-image-tag
+```
+
+Then point the Home Assistant integration at that bridge URL and complete GitHub setup through the integration flow or the exposed auth endpoints.
+
 ## Documentation
 
 Detailed documentation now lives under `docs/`:
