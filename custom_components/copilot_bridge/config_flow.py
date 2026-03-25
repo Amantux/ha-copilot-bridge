@@ -138,10 +138,8 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "service": str(health.get("service", "copilot_bridge")),
                 "version": str(health.get("version", "unknown")),
-                "github_oauth_client_status": (
-                    "Configured"
-                    if github_auth.get("oauth_client_configured")
-                    else "Not configured"
+                "github_browser_auth_status": self._format_browser_signin_status(
+                    github_auth
                 ),
                 "github_token_status": (
                     "Configured"
@@ -187,7 +185,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 selected_action == AUTH_METHOD_DEVICE_FLOW
                 and not (
                     self._github_auth_status
-                    and self._github_auth_status.get("oauth_client_configured")
+                    and self._github_auth_status.get("browser_auth_supported")
                 )
             ):
                 errors["base"] = "device_flow_not_available"
@@ -359,11 +357,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _show_github_config_form(self, errors: dict[str, str]):
         github_status = self._github_auth_status or {}
         current_status = self._format_github_auth_status(github_status)
-        oauth_client_status = (
-            "Configured"
-            if github_status.get("oauth_client_configured")
-            else "Not configured"
-        )
+        browser_signin_status = self._format_browser_signin_status(github_status)
         configured_token_status = (
             "Configured"
             if github_status.get("configured_token_present")
@@ -374,14 +368,12 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         action_options = [
-            (AUTH_METHOD_ADDON_CONFIG, "Use GitHub auth already configured on the bridge"),
             (AUTH_METHOD_DEVICE_FLOW, "Sign in with GitHub in the browser"),
+            (AUTH_METHOD_ADDON_CONFIG, "Use GitHub auth already configured on the bridge"),
             (AUTH_METHOD_MANUAL_TOKEN, "Paste a GitHub token"),
             (AUTH_METHOD_NONE, "Skip GitHub setup for now"),
         ]
-        default_action = self._entry_data.get(
-            CONF_GITHUB_AUTH_METHOD, DEFAULT_GITHUB_AUTH_METHOD
-        )
+        default_action = AUTH_METHOD_DEVICE_FLOW
         if github_status.get("authenticated"):
             action_options.insert(
                 0, (ACTION_REUSE_EXISTING_AUTH, "Reuse existing GitHub sign-in")
@@ -401,7 +393,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={
                 "current_status": current_status,
-                "oauth_client_status": oauth_client_status,
+                "browser_signin_status": browser_signin_status,
                 "configured_token_status": configured_token_status,
                 "auth_storage_status": auth_storage_status,
             },
@@ -453,9 +445,19 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return f"Will persist to {path}"
         return f"Not writable at {path}"
 
+    def _format_browser_signin_status(self, github_status: dict[str, Any]) -> str:
+        if github_status.get("browser_auth_supported"):
+            backend = github_status.get("browser_auth_backend")
+            if backend == "gh_cli":
+                return "Available via GitHub CLI"
+            if backend == "oauth_app":
+                return "Available via OAuth app"
+            return "Available"
+        return "Not available"
+
     def _resolve_existing_auth_method(self) -> str:
         auth_mode = (self._github_auth_status or {}).get("auth_mode")
-        if auth_mode == "device_flow":
+        if auth_mode in {"device_flow", "gh_cli"}:
             return AUTH_METHOD_DEVICE_FLOW
         if auth_mode == "manual_token":
             return AUTH_METHOD_MANUAL_TOKEN
@@ -606,7 +608,7 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
                 selected_action == AUTH_METHOD_DEVICE_FLOW
                 and not (
                     self._github_auth_status
-                    and self._github_auth_status.get("oauth_client_configured")
+                    and self._github_auth_status.get("browser_auth_supported")
                 )
             ):
                 errors["base"] = "device_flow_not_available"
@@ -817,11 +819,7 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
     def _show_options_init_form(self, errors: dict[str, str]):
         github_status = self._github_auth_status or {}
         current_status = self._format_github_auth_status(github_status)
-        oauth_client_status = (
-            "Configured"
-            if github_status.get("oauth_client_configured")
-            else "Not configured"
-        )
+        browser_signin_status = self._format_browser_signin_status(github_status)
         configured_token_status = (
             "Configured"
             if github_status.get("configured_token_present")
@@ -832,16 +830,18 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
         )
 
         action_options = [
+            (AUTH_METHOD_DEVICE_FLOW, "Sign in with GitHub in the browser"),
             (ACTION_KEEP_CURRENT_AUTH, "Keep current GitHub settings"),
             (AUTH_METHOD_ADDON_CONFIG, "Use GitHub auth already configured on the bridge"),
-            (AUTH_METHOD_DEVICE_FLOW, "Sign in with GitHub in the browser"),
             (AUTH_METHOD_MANUAL_TOKEN, "Paste a GitHub token"),
             (ACTION_CLEAR_GITHUB_AUTH, "Clear bridge GitHub auth"),
         ]
+        default_action = AUTH_METHOD_DEVICE_FLOW
         if github_status.get("authenticated"):
             action_options.insert(
                 1, (ACTION_REUSE_EXISTING_AUTH, "Reuse existing GitHub sign-in")
             )
+            default_action = ACTION_KEEP_CURRENT_AUTH
 
         return self.async_show_form(
             step_id="init",
@@ -849,14 +849,14 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Required(
                         CONF_GITHUB_AUTH_ACTION,
-                        default=ACTION_KEEP_CURRENT_AUTH,
+                        default=default_action,
                     ): vol.In(dict(action_options)),
                 }
             ),
             errors=errors,
             description_placeholders={
                 "current_status": current_status,
-                "oauth_client_status": oauth_client_status,
+                "browser_signin_status": browser_signin_status,
                 "configured_token_status": configured_token_status,
                 "auth_storage_status": auth_storage_status,
             },
@@ -910,7 +910,7 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
 
     def _resolve_existing_auth_method(self) -> str:
         auth_mode = (self._github_auth_status or {}).get("auth_mode")
-        if auth_mode == "device_flow":
+        if auth_mode in {"device_flow", "gh_cli"}:
             return AUTH_METHOD_DEVICE_FLOW
         if auth_mode == "manual_token":
             return AUTH_METHOD_MANUAL_TOKEN

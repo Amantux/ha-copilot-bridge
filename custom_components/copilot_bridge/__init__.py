@@ -6,33 +6,14 @@ import voluptuous as vol
 
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_API_KEY, CONF_URL
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import CopilotBridgeApiClient, CopilotBridgeApiError
 from .config_flow import _create_bridge_client
 from .const import (
-    CONF_ALLOW_FILESYSTEM_ACCESS,
-    CONF_ALLOW_HOME_ASSISTANT_ACTIONS,
-    CONF_ASSISTANT_PROFILE,
-    CONF_ENABLE_HACS_DISCOVERY,
-    CONF_ENABLE_INTEGRATION_DISCOVERY,
-    CONF_ENABLE_TOOLING_DISCOVERY,
-    CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
-    CONF_READ_ONLY_MODE,
-    CONF_USE_HOME_ASSISTANT_MCP,
     DATA_AGENT,
     DATA_CLIENT,
-    DEFAULT_ALLOW_FILESYSTEM_ACCESS,
-    DEFAULT_ALLOW_HOME_ASSISTANT_ACTIONS,
-    DEFAULT_ASSISTANT_PROFILE,
-    DEFAULT_ENABLE_HACS_DISCOVERY,
-    DEFAULT_ENABLE_INTEGRATION_DISCOVERY,
-    DEFAULT_ENABLE_TOOLING_DISCOVERY,
-    DEFAULT_READ_ONLY_MODE,
-    DEFAULT_URL,
     DOMAIN,
     SERVICE_CLEAR_GITHUB_AUTH,
     SERVICE_ASK,

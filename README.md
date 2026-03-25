@@ -10,6 +10,8 @@ It is designed around:
 - optional Home Assistant MCP usage
 - a read-only advisor posture for integration, HACS, and tooling recommendations
 
+GitHub sign-in is designed to prefer a browser/device-code style flow through the bridge so Home Assistant can show a code, let you approve access in the browser, and then continue setup.
+
 ## Current state
 
 This repository is a strong foundation, not a finished runtime.

@@ -40,7 +40,7 @@ That bridge test step surfaces a few basic details from `/health`, including:
 
 - bridge service name
 - bridge version
-- whether the bridge GitHub OAuth client is configured
+- whether bridge GitHub browser sign-in is available
 - whether a bridge-configured GitHub token is present
 - where bridge auth state will be stored
 - whether Home Assistant MCP is configured on the bridge
@@ -60,7 +60,8 @@ The setup flow now also:
 
 - inspects current bridge auth state
 - can reuse an existing authenticated GitHub session
-- blocks device flow when the bridge OAuth client is not configured
+- prefers bridge-managed GitHub CLI browser sign-in when available
+- blocks browser sign-in only when the bridge has no supported browser-auth backend
 - blocks the "use bridge-configured auth" path when the bridge does not actually have a configured token
 - resumes an already pending device flow when possible
 - presents GitHub setup as an explicit guided action choice instead of a mixed settings form
@@ -99,6 +100,8 @@ The scaffolded add-on currently exposes:
 
 `GET /health` now includes redacted bridge GitHub auth metadata such as:
 
+- `browser_auth_supported`
+- `browser_auth_backend`
 - `oauth_client_configured`
 - `configured_token_present`
 - `default_scopes`
