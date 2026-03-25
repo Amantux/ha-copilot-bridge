@@ -61,7 +61,7 @@ For the add-on:
 1. Add `https://github.com/amantux/ha-copilot-bridge` as a custom add-on repository.
 2. Install **Copilot Bridge** from the Add-on Store.
 3. Start the add-on.
-4. Configure the integration with the actual stable bridge URL reachable from Home Assistant.
+4. Prefer the discovered add-on flow in Home Assistant when it appears; otherwise configure the integration with the actual stable bridge URL reachable from Home Assistant.
 
 For a standalone container:
 

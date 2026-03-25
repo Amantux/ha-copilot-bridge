@@ -1,16 +1,13 @@
 name: "Copilot Bridge"
 description: "Local GitHub Copilot bridge service for Home Assistant"
-version: "0.1.0.1"
+version: "0.1.0.2"
 slug: "home-assistant-copilot-bridge"
 init: false
 startup: services
 boot: auto
-ingress: true
-ingress_port: 8099
+ingress: false
 discovery:
   - copilot_bridge
-panel_title: "Copilot Bridge"
-panel_icon: "mdi:robot-outline"
 watchdog: "http://[HOST]:[PORT:8099]/health"
 url: "https://github.com/amantux/ha-copilot-bridge"
 arch:

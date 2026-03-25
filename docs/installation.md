@@ -39,7 +39,8 @@ If Home Assistant Supervisor discovery is available, the integration can now off
 The add-on is configured for internal-only access:
 
 - no published host port
-- Home Assistant Ingress enabled
+- no Home Assistant Ingress panel
+- Home Assistant Supervisor discovery enabled
 - integration traffic should target a stable, reachable internal bridge URL
 
 That means the bridge is intended to be reachable from the Home Assistant host/container environment, not directly from other devices on your LAN.
