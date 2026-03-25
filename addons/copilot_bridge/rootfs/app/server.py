@@ -840,6 +840,24 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
         cleaned = _sanitize_terminal_output(output)
         if cleaned:
             LOGGER.debug("gh auth PTY output (cleaned):\n%s", cleaned)
+        lower_output = cleaned.lower()
+        if (
+            "authenticate git with your github credentials" in lower_output
+            or (
+                "authenticate git" in lower_output
+                and "credentials" in lower_output
+            )
+        ):
+            LOGGER.info(
+                "Answering GitHub CLI git auth prompt: skipping Git configuration"
+            )
+            with GH_AUTH_LOCK:
+                if GH_AUTH_MASTER_FD is not None:
+                    try:
+                        os.write(GH_AUTH_MASTER_FD, b"n\n")
+                    except OSError:
+                        pass
+            continue
 
         # Stage 1: answer the auth method prompt
         if not prompt_answered and (
