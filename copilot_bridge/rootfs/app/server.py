@@ -205,6 +205,11 @@ def _device_flow_backend() -> str:
 def _gh_env() -> dict[str, str]:
     env = os.environ.copy()
     env["GH_CONFIG_DIR"] = str(GH_CONFIG_DIR)
+    # Force plain-text terminal output so gh doesn't use cursor-positioning TUI
+    # (bubbletea/survey) that our ANSI stripper can't reliably reconstruct.
+    env["TERM"] = "dumb"
+    env["NO_COLOR"] = "1"
+    env["GH_NO_UPDATE_NOTIFIER"] = "1"
     return env
 
 
@@ -287,7 +292,8 @@ def _read_gh_auth_output_unlocked() -> str:
             break
         try:
             chunk = os.read(GH_AUTH_MASTER_FD, 4096)
-        except OSError:
+        except OSError as exc:
+            LOGGER.warning("PTY read error (master_fd=%s): %s", GH_AUTH_MASTER_FD, exc)
             break
         if not chunk:
             break
@@ -802,7 +808,7 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
     #          → press Enter to select "Login with a web browser" (first/default option)
     # Stage 2: gh prints "First copy your one-time code: XXXX-XXXX"
     #          → capture the code; press Enter so gh opens the activation URL
-    code_deadline = time.time() + 30
+    code_deadline = time.time() + 60  # 60s — gh startup + TUI paint can be slow
     output = ""
     details: dict[str, Any] = {}
     prompt_answered = False
@@ -832,11 +838,14 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
             )
 
         cleaned = _sanitize_terminal_output(output)
+        if cleaned:
+            LOGGER.debug("gh auth PTY output (cleaned):\n%s", cleaned)
 
         # Stage 1: answer the auth method prompt
         if not prompt_answered and (
             "Login with a web browser" in cleaned
             or "How would you like to authenticate" in cleaned
+            or "web browser" in cleaned.lower()
         ):
             LOGGER.info(
                 "Answering GitHub CLI auth prompt: selecting 'Login with a web browser'"
@@ -855,7 +864,7 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
         if details.get("user_code") and not code_entered:
             LOGGER.info(
                 "GitHub CLI printed device code after %.1fs; pressing Enter to open activation URL",
-                30 - (code_deadline - time.time()),
+                60 - (code_deadline - time.time()),
             )
             with GH_AUTH_LOCK:
                 if GH_AUTH_MASTER_FD is not None:
@@ -873,9 +882,10 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
 
     if not code_entered:
         LOGGER.warning(
-            "GitHub CLI did not print a device code within 30s; "
-            "prompt_answered=%s — sending Enter anyway",
+            "GitHub CLI did not print a device code within 60s; "
+            "prompt_answered=%s — sending Enter anyway\nPTY output so far:\n%s",
             prompt_answered,
+            _sanitize_terminal_output(output) or "(empty)",
         )
         with GH_AUTH_LOCK:
             if GH_AUTH_MASTER_FD is not None:
