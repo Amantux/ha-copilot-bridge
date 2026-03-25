@@ -17,7 +17,7 @@ from typing import Any
 from urllib import error, parse, request
 
 
-BRIDGE_VERSION = "0.1.4"
+BRIDGE_VERSION = "0.1.5"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 CONFIGURED_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
@@ -811,7 +811,8 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
     code_deadline = time.time() + 60  # 60s — gh startup + TUI paint can be slow
     output = ""
     details: dict[str, Any] = {}
-    prompt_answered = False
+    git_prompt_answered = False
+    auth_prompt_answered = False
     code_entered = False
 
     while time.time() < code_deadline:
@@ -842,7 +843,7 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
             LOGGER.debug("gh auth PTY output (cleaned):\n%s", cleaned)
         lower_output = cleaned.lower()
         if (
-            not prompt_answered
+            not git_prompt_answered
             and (
                 "authenticate git with your github credentials" in lower_output
                 or (
@@ -857,17 +858,20 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
             with GH_AUTH_LOCK:
                 if GH_AUTH_MASTER_FD is not None:
                     try:
-                        os.write(GH_AUTH_MASTER_FD, b"n\n")
+                        os.write(GH_AUTH_MASTER_FD, b"y\n")
                     except OSError:
                         pass
-            prompt_answered = True
+            git_prompt_answered = True
             continue
 
         # Stage 1: answer the auth method prompt
-        if not prompt_answered and (
-            "Login with a web browser" in cleaned
-            or "How would you like to authenticate" in cleaned
-            or "web browser" in cleaned.lower()
+        if (
+            not auth_prompt_answered
+            and (
+                "login with a web browser" in lower_output
+                or "how would you like to authenticate" in lower_output
+                or "web browser" in lower_output
+            )
         ):
             LOGGER.info(
                 "Answering GitHub CLI auth prompt: selecting 'Login with a web browser'"
@@ -878,7 +882,7 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
                         os.write(GH_AUTH_MASTER_FD, b"\n")
                     except OSError:
                         pass
-            prompt_answered = True
+            auth_prompt_answered = True
             continue
 
         # Stage 2: capture the device code
@@ -903,10 +907,11 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
             break
 
     if not code_entered:
+        auth_status = auth_prompt_answered
         LOGGER.warning(
             "GitHub CLI did not print a device code within 60s; "
-            "prompt_answered=%s — sending Enter anyway\nPTY output so far:\n%s",
-            prompt_answered,
+            "auth_prompt_answered=%s — sending Enter anyway\nPTY output so far:\n%s",
+            auth_status,
             _sanitize_terminal_output(output) or "(empty)",
         )
         with GH_AUTH_LOCK:
