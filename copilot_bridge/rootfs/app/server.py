@@ -17,7 +17,7 @@ from typing import Any
 from urllib import error, parse, request
 
 
-BRIDGE_VERSION = "0.1.6"
+BRIDGE_VERSION = "0.1.7"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 CONFIGURED_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
@@ -812,6 +812,7 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
     output = ""
     details: dict[str, Any] = {}
     git_prompt_answered = False
+    git_prompt_answered_at: float | None = None
     auth_prompt_answered = False
     code_entered = False
 
@@ -858,10 +859,11 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
             with GH_AUTH_LOCK:
                 if GH_AUTH_MASTER_FD is not None:
                     try:
-                        os.write(GH_AUTH_MASTER_FD, b"Y\n")
-                    except OSError:
-                        pass
+            os.write(GH_AUTH_MASTER_FD, b"Y\n")
+            except OSError:
+                pass
             git_prompt_answered = True
+            git_prompt_answered_at = time.time()
             continue
 
         # Stage 1: answer the auth method prompt
@@ -875,6 +877,24 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
         ):
             LOGGER.info(
                 "Answering GitHub CLI auth prompt: selecting 'Login with a web browser'"
+            )
+            with GH_AUTH_LOCK:
+                if GH_AUTH_MASTER_FD is not None:
+                    try:
+                        os.write(GH_AUTH_MASTER_FD, b"\n")
+                    except OSError:
+                        pass
+            auth_prompt_answered = True
+            continue
+
+        if (
+            not auth_prompt_answered
+            and git_prompt_answered
+            and git_prompt_answered_at is not None
+            and time.time() - git_prompt_answered_at > 0.75
+        ):
+            LOGGER.info(
+                "Assuming GitHub CLI auth prompt is ready; pressing Enter for default"
             )
             with GH_AUTH_LOCK:
                 if GH_AUTH_MASTER_FD is not None:
