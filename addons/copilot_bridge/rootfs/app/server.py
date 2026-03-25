@@ -17,7 +17,7 @@ from typing import Any
 from urllib import error, parse, request
 
 
-BRIDGE_VERSION = "0.1.3"
+BRIDGE_VERSION = "0.1.4"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 CONFIGURED_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
@@ -842,10 +842,13 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
             LOGGER.debug("gh auth PTY output (cleaned):\n%s", cleaned)
         lower_output = cleaned.lower()
         if (
-            "authenticate git with your github credentials" in lower_output
-            or (
-                "authenticate git" in lower_output
-                and "credentials" in lower_output
+            not prompt_answered
+            and (
+                "authenticate git with your github credentials" in lower_output
+                or (
+                    "authenticate git" in lower_output
+                    and "credentials" in lower_output
+                )
             )
         ):
             LOGGER.info(
