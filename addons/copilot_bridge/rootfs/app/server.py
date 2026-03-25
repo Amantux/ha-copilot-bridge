@@ -859,9 +859,9 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
             with GH_AUTH_LOCK:
                 if GH_AUTH_MASTER_FD is not None:
                     try:
-            os.write(GH_AUTH_MASTER_FD, b"Y\n")
-            except OSError:
-                pass
+                        os.write(GH_AUTH_MASTER_FD, b"Y\n")
+                    except OSError:
+                        pass
             git_prompt_answered = True
             git_prompt_answered_at = time.time()
             continue
