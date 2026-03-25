@@ -46,6 +46,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
     _entry_data: dict[str, Any]
     _client: CopilotBridgeApiClient | None = None
+    _bridge_health: dict[str, Any] | None = None
     _device_flow_details: dict[str, Any] | None = None
     _github_auth_status: dict[str, Any] | None = None
 
@@ -75,7 +76,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                await client.async_health()
+                self._bridge_health = await client.async_health()
             except CopilotBridgeApiError:
                 errors["base"] = "cannot_connect"
             else:
@@ -105,7 +106,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     DEFAULT_ENABLE_TOOLING_DISCOVERY,
                 )
                 self._client = client
-                return await self.async_step_github_config()
+                return await self.async_step_bridge_connection_test()
 
         return self.async_show_form(
             step_id="user",
@@ -121,6 +122,36 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+    async def async_step_bridge_connection_test(self, user_input: dict | None = None):
+        if self._client is None:
+            return await self.async_step_user()
+
+        if user_input is not None:
+            return await self.async_step_github_config()
+
+        health = self._bridge_health or {}
+        github_auth = health.get("github_auth") or {}
+        mcp = ((health.get("mcp") or {}).get("home_assistant") or {})
+        return self.async_show_form(
+            step_id="bridge_connection_test",
+            data_schema=vol.Schema({}),
+            errors={},
+            description_placeholders={
+                "service": str(health.get("service", "copilot_bridge")),
+                "version": str(health.get("version", "unknown")),
+                "github_oauth_client_status": (
+                    "Configured"
+                    if github_auth.get("oauth_client_configured")
+                    else "Not configured"
+                ),
+                "mcp_status": (
+                    "Configured"
+                    if mcp.get("configured")
+                    else "Not configured"
+                ),
+            },
         )
 
     async def async_step_github_config(self, user_input: dict | None = None):

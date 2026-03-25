@@ -49,5 +49,5 @@ Recommended sequence:
 1. Install the add-on.
 2. Start and configure the add-on.
 3. Install the integration through HACS.
-4. Add the integration in Home Assistant.
-5. Configure GitHub auth and optional MCP settings.
+4. Add the integration in Home Assistant and use the bridge connection test step to verify the local bridge responds.
+5. Continue through GitHub auth and optional MCP-related settings.

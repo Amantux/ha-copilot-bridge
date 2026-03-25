@@ -23,6 +23,17 @@ Supported fields:
 - `user_id`
 - `use_home_assistant_mcp`
 
+## Integration setup flow
+
+The setup now explicitly tests the bridge connection after the initial connection settings step.
+
+That bridge test step surfaces a few basic details from `/health`, including:
+
+- bridge service name
+- bridge version
+- whether the add-on GitHub OAuth client is configured
+- whether Home Assistant MCP is configured on the bridge
+
 ## Integration setup auth selection
 
 During integration configuration, the user now reaches a dedicated GitHub configuration step after the initial bridge connection step. In that GitHub step, the user can choose:
