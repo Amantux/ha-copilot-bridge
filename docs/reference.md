@@ -32,6 +32,10 @@ The setup now follows a staged sequence instead of a single mixed form:
 3. complete GitHub auth
 4. configure Home Assistant MCP separately
 
+The initial bridge step now requires an explicit full URL instead of assuming a slug-derived hostname. This reduces the chance that container updates or deployment changes break connectivity.
+
+When the Copilot Bridge is installed as a Home Assistant add-on, the integration now also supports Supervisor add-on discovery. In that path, Home Assistant provides the discovered host and port, and the user only needs to confirm the connection and optionally provide the bridge API key.
+
 That bridge test step surfaces a few basic details from `/health`, including:
 
 - bridge service name
@@ -67,6 +71,19 @@ After GitHub setup completes, the user reaches a separate MCP configuration step
 
 - whether Home Assistant MCP should be requested by default
 - the MCP server name to reference from bridge requests
+
+## Options flow
+
+After the integration is set up, the Home Assistant options UI can now manage bridge GitHub auth without calling raw services manually.
+
+The options flow supports:
+
+- keeping the current bridge GitHub auth state
+- reusing an existing bridge GitHub sign-in
+- starting GitHub device flow through the bridge
+- setting a GitHub token through the bridge
+- clearing bridge GitHub auth
+- updating MCP request preferences
 
 ## Bridge API
 

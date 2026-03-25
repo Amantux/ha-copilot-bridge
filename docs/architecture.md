@@ -56,11 +56,9 @@ The current default posture is intentionally conservative:
 
 ## Internal networking
 
-The integration defaults to:
+The integration should use an explicit bridge URL chosen by the operator.
 
-`http://home-assistant-copilot-bridge:8099`
-
-That hostname comes from the add-on slug and is intended for Home Assistant internal networking rather than direct network exposure.
+For reliability, that URL should point at a stable hostname or service name that survives container recreation and upgrades.
 
 ## Current implementation status
 

@@ -7,6 +7,8 @@ startup: services
 boot: auto
 ingress: true
 ingress_port: 8099
+discovery:
+  - copilot_bridge
 panel_title: "Copilot Bridge"
 panel_icon: "mdi:robot-outline"
 watchdog: "http://[HOST]:[PORT:8099]/health"

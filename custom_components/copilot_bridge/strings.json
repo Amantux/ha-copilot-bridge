@@ -3,9 +3,16 @@
     "step": {
       "user": {
         "title": "Connect to Copilot Bridge",
-        "description": "Connect Home Assistant to the local Copilot bridge service. Submitting this step tests the bridge connection.",
+        "description": "Connect Home Assistant to the Copilot bridge service. Enter a stable bridge URL that will not change across container updates, such as a Docker service name or fixed internal hostname. Avoid localhost unless the bridge runs inside the exact same container or process as Home Assistant. Submitting this step tests the bridge connection.",
         "data": {
           "url": "Bridge URL",
+          "api_key": "API key"
+        }
+      },
+      "hassio_confirm": {
+        "title": "Connect to discovered Copilot Bridge add-on",
+        "description": "Home Assistant discovered the {addon} add-on at {url}. Enter the bridge API key if you configured one, then submit to test the connection.",
+        "data": {
           "api_key": "API key"
         }
       },
@@ -49,6 +56,7 @@
     },
     "error": {
       "cannot_connect": "Failed to connect to the bridge service",
+      "invalid_url": "Enter a full bridge URL such as http://copilot-bridge:8099",
       "invalid_auth": "Failed to validate the GitHub token",
       "device_flow_error": "GitHub device flow could not be completed",
       "device_flow_not_available": "GitHub device flow is not available because the bridge OAuth client is not configured",
@@ -56,6 +64,50 @@
     },
     "abort": {
       "already_configured": "This bridge is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Manage GitHub access",
+        "description": "Manage GitHub access through the Copilot Bridge. Current bridge status: {current_status} OAuth client status: {oauth_client_status}. Configured bridge token: {configured_token_status}. Auth storage: {auth_storage_status}.",
+        "data": {
+          "github_auth_action": "GitHub action"
+        }
+      },
+      "github_device_flow_options": {
+        "title": "Start GitHub sign-in",
+        "description": "Choose the GitHub OAuth scopes to request before starting browser-based sign-in.",
+        "data": {
+          "github_auth_scopes": "GitHub OAuth scopes"
+        }
+      },
+      "manual_token": {
+        "title": "Set GitHub token",
+        "description": "Provide a GitHub token to validate and store on the bridge.",
+        "data": {
+          "token": "GitHub token"
+        }
+      },
+      "github_device_flow": {
+        "title": "Authorize GitHub device flow",
+        "description": "Open {verification_uri} and enter code {user_code}. Requested scopes: {scope}. After authorizing, submit again to continue. Current status: {status_message}"
+      },
+      "mcp_config": {
+        "title": "Configure Home Assistant MCP",
+        "description": "Configure MCP after GitHub setup. Enable it only if this bridge should request the Home Assistant MCP server for prompts.",
+        "data": {
+          "use_home_assistant_mcp": "Use Home Assistant MCP server",
+          "home_assistant_mcp_server_name": "Home Assistant MCP server name"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Failed to validate the GitHub token",
+      "device_flow_error": "GitHub device flow could not be completed",
+      "device_flow_not_available": "GitHub device flow is not available because the bridge OAuth client is not configured",
+      "bridge_auth_not_configured": "GitHub auth is not configured on the bridge yet",
+      "clear_auth_failed": "Failed to clear GitHub auth on the bridge"
     }
   }
 }

@@ -59,7 +59,7 @@ For the add-on:
 1. Add `https://github.com/amantux/ha-copilot-bridge` as a custom add-on repository.
 2. Install **Copilot Bridge** from the Add-on Store.
 3. Start the add-on.
-4. Keep the integration pointed at `http://home-assistant-copilot-bridge:8099`.
+4. Configure the integration with the actual stable bridge URL reachable from Home Assistant.
 
 For a standalone container:
 
@@ -75,6 +75,8 @@ docker run --name copilot-bridge \
 ```
 
 Then point the Home Assistant integration at that bridge URL and complete GitHub setup through the integration flow or the exposed auth endpoints.
+
+Use a stable hostname or Docker service name for that URL so container replacement or image updates do not change what the integration connects to.
 
 ## Documentation
 

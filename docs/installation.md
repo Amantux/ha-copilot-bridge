@@ -32,13 +32,15 @@ Steps:
 6. Install **Copilot Bridge**.
 7. Start the add-on.
 
+If Home Assistant Supervisor discovery is available, the integration can now offer a discovered add-on flow instead of requiring you to type the bridge URL manually.
+
 ## Networking behavior
 
 The add-on is configured for internal-only access:
 
 - no published host port
 - Home Assistant Ingress enabled
-- integration traffic sent to `http://home-assistant-copilot-bridge:8099`
+- integration traffic should target a stable, reachable internal bridge URL
 
 That means the bridge is intended to be reachable from the Home Assistant host/container environment, not directly from other devices on your LAN.
 
@@ -64,7 +66,8 @@ Notes:
 - publish port `8099` only if Home Assistant needs to reach the container over your Docker network or host
 - mount a persistent volume and point `GITHUB_AUTH_STATE_PATH` into it so device-flow and pasted-token auth survive restarts
 - if you prefer a static token, set `GITHUB_TOKEN` instead of using device flow
-- if Home Assistant runs in Docker too, use a shared Docker network and configure the integration with the container hostname instead of `localhost`
+- if Home Assistant runs in Docker too, use a shared Docker network and configure the integration with a stable container hostname or service name instead of `localhost`
+- keep that hostname stable across updates by using Docker Compose service names, a fixed container name, or another persistent internal DNS name
 
 ## Installation order
 
