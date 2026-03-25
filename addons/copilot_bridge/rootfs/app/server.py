@@ -485,7 +485,7 @@ def _github_post_form(url: str, data: dict[str, str]) -> dict[str, Any]:
         headers={
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "ha-copilot-bridge/0.1.0",
+            "User-Agent": "ha-copilot-bridge/0.1.0.1",
         },
         method="POST",
     )
@@ -517,7 +517,7 @@ def _github_get_json(url: str, token: str) -> dict[str, Any]:
         headers={
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "ha-copilot-bridge/0.1.0",
+            "User-Agent": "ha-copilot-bridge/0.1.0.1",
         },
         method="GET",
     )
@@ -547,7 +547,7 @@ def _github_get_json_with_headers(
         headers={
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "ha-copilot-bridge/0.1.0",
+            "User-Agent": "ha-copilot-bridge/0.1.0.1",
         },
         method="GET",
     )
@@ -984,7 +984,7 @@ def _clear_github_auth() -> dict[str, Any]:
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
-    server_version = "copilot-bridge/0.1.0"
+    server_version = "copilot-bridge/0.1.0.1"
 
     def do_GET(self) -> None:
         if self.path == "/health":
@@ -993,7 +993,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 {
                     "status": "ok",
                     "service": "copilot_bridge",
-                    "version": "0.1.0",
+                    "version": "0.1.0.1",
                     "allowed_paths": ALLOWED_PATHS,
                     "assistant_policy": _default_assistant_policy(),
                     "github_auth": {
