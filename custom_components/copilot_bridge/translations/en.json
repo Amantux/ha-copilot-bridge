@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to Copilot Bridge",
-        "description": "Connect Home Assistant to the Copilot bridge service. Enter a stable bridge URL that will not change across container updates, such as a Docker service name or fixed internal hostname. Avoid localhost unless the bridge runs inside the exact same container or process as Home Assistant. Submitting this step tests the bridge connection.",
+        "description": "Connect Home Assistant to the Copilot bridge service. Enter the bridge URL and optional API key, then submit to validate the bridge and continue to MCP settings.",
         "data": {
           "url": "Bridge URL",
           "api_key": "API key"
@@ -11,21 +11,17 @@
       },
       "hassio_confirm": {
         "title": "Connect to discovered Copilot Bridge add-on",
-        "description": "Home Assistant discovered the {addon} add-on at {url}. Enter the bridge API key if you configured one, then submit to test the connection.",
+        "description": "Home Assistant discovered the {addon} add-on at {url}. Enter the bridge API key if configured, then submit to continue.",
         "data": {
           "api_key": "API key"
         }
       },
       "zeroconf_confirm": {
         "title": "Connect to discovered Copilot Bridge",
-        "description": "Home Assistant discovered {name} at {url}. Enter the bridge API key if required, then submit to test the connection.",
+        "description": "Home Assistant discovered {name} at {url}. Enter the bridge API key if required, then submit to continue.",
         "data": {
           "api_key": "API key"
         }
-      },
-      "bridge_connection_test": {
-        "title": "Bridge connection tested",
-        "description": "Bridge connection succeeded. Service: {service}. Version: {version}. GitHub browser sign-in: {github_browser_auth_status}. GitHub token: {github_token_status}. Auth storage: {github_auth_storage}. Home Assistant MCP: {mcp_status}. Submit to continue."
       },
       "github_config": {
         "title": "Configure GitHub access",

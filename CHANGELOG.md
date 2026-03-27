@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.15] - 2026-03-27
+
+### Changed
+- Streamlined initial setup by moving directly from connection validation into MCP settings, reducing extra confirmation clicks in both manual and discovered flows.
+- Updated config-flow copy to emphasize Home Assistant discovery and the simplified setup path.
+- Bumped bridge runtime, add-on, and integration version metadata to `0.1.15`.
+
 ## [0.1.14] - 2026-03-27
 
 ### Changed

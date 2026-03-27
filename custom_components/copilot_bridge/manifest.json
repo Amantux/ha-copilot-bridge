@@ -17,7 +17,7 @@
   "zeroconf": [
     "_copilot-bridge._tcp.local."
   ],
-  "version": "0.1.14",
+  "version": "0.1.15",
   "hassio": [
     "home-assistant-copilot-bridge",
     "copilot_bridge"
