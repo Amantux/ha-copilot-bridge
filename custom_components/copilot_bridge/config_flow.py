@@ -49,7 +49,6 @@ ACTION_KEEP_CURRENT_AUTH = "keep_current_auth"
 ACTION_CLEAR_GITHUB_AUTH = "clear_github_auth"
 ACTION_RESTART_GITHUB_DEVICE_FLOW = "restart_github_device_flow"
 
-
 class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
     _entry_data: dict[str, Any]
@@ -74,7 +73,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     api_key=user_input.get(CONF_API_KEY),
                 )
                 if initialized:
-                    return await self.async_step_bridge_connection_test()
+                    return await self.async_step_mcp_config()
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(
@@ -121,7 +120,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 api_key=user_input.get(CONF_API_KEY),
             )
             if initialized:
-                return await self.async_step_bridge_connection_test()
+                return await self.async_step_mcp_config()
             errors["base"] = "cannot_connect"
 
         return self.async_show_form(
@@ -150,7 +149,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 api_key=user_input.get(CONF_API_KEY),
             )
             if initialized:
-                return await self.async_step_bridge_connection_test()
+                return await self.async_step_mcp_config()
             errors["base"] = "cannot_connect"
 
         return self.async_show_form(
@@ -160,30 +159,6 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "addon": str(self._hassio_discovery.get("addon", "Copilot Bridge")),
                 "url": discovered_url,
-            },
-        )
-
-    async def async_step_bridge_connection_test(self, user_input: dict | None = None):
-        if self._client is None:
-            return await self.async_step_user()
-
-        if user_input is not None:
-            return await self.async_step_mcp_config()
-
-        health = self._bridge_health or {}
-        mcp = ((health.get("mcp") or {}).get("home_assistant") or {})
-        return self.async_show_form(
-            step_id="bridge_connection_test",
-            data_schema=vol.Schema({}),
-            errors={},
-            description_placeholders={
-                "service": str(health.get("service", "copilot_bridge")),
-                "version": str(health.get("version", "unknown")),
-                "mcp_status": (
-                    "Configured"
-                    if mcp.get("configured")
-                    else "Not configured"
-                ),
             },
         )
 
@@ -650,7 +625,6 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
         return CopilotBridgeOptionsFlow(config_entry)
 
-
 class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
@@ -1027,7 +1001,6 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
             return AUTH_METHOD_ADDON_CONFIG
         return DEFAULT_GITHUB_AUTH_METHOD
 
-
 def _entry_value(
     entry_data: Mapping[str, Any],
     entry_options: Mapping[str, Any],
@@ -1035,7 +1008,6 @@ def _entry_value(
     default: Any,
 ) -> Any:
     return entry_options.get(key, entry_data.get(key, default))
-
 
 def _create_bridge_client(
     hass,
