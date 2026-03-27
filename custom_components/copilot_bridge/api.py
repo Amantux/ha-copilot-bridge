@@ -71,6 +71,14 @@ class CopilotBridgeApiClient:
     async def async_poll_github_device_flow(self) -> dict[str, Any]:
         return await self._request("POST", "/auth/device/poll", json_payload={})
 
+    async def async_restart_github_device_flow(
+        self, *, scopes: str | None = None
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if scopes:
+            payload["scopes"] = scopes
+        return await self._request("POST", "/auth/device/restart", json_payload=payload)
+
     async def async_set_github_token(self, *, token: str) -> dict[str, Any]:
         return await self._request(
             "POST",

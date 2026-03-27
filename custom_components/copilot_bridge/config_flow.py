@@ -47,6 +47,7 @@ CONF_GITHUB_AUTH_ACTION = "github_auth_action"
 ACTION_REUSE_EXISTING_AUTH = "reuse_existing_auth"
 ACTION_KEEP_CURRENT_AUTH = "keep_current_auth"
 ACTION_CLEAR_GITHUB_AUTH = "clear_github_auth"
+ACTION_RESTART_GITHUB_DEVICE_FLOW = "restart_github_device_flow"
 
 
 class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -218,6 +219,16 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 return await self.async_step_mcp_config()
 
+            if selected_action == ACTION_CLEAR_GITHUB_AUTH:
+                try:
+                    await self._client.async_clear_github_auth()
+                except CopilotBridgeApiError:
+                    errors["base"] = "clear_auth_failed"
+                else:
+                    self._github_auth_status = await self._async_fetch_github_auth_status()
+                    self._entry_data[CONF_GITHUB_AUTH_METHOD] = AUTH_METHOD_NONE
+                    return await self.async_step_mcp_config()
+
             self._entry_data[CONF_GITHUB_AUTH_METHOD] = selected_action
 
             if selected_action == AUTH_METHOD_ADDON_CONFIG and not bridge_has_configured_token:
@@ -237,15 +248,17 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if selected_action == AUTH_METHOD_MANUAL_TOKEN:
                 return await self.async_step_manual_token()
-            if selected_action == AUTH_METHOD_DEVICE_FLOW:
-                return await self.async_step_github_device_flow_options()
+            if selected_action in {AUTH_METHOD_DEVICE_FLOW, ACTION_RESTART_GITHUB_DEVICE_FLOW}:
+                return await self.async_step_github_device_flow_options(
+                    force_restart=(selected_action == ACTION_RESTART_GITHUB_DEVICE_FLOW)
+                )
 
             return await self.async_step_mcp_config()
 
         return self._show_github_config_form(errors)
 
     async def async_step_github_device_flow_options(
-        self, user_input: dict | None = None
+        self, user_input: dict | None = None, *, force_restart: bool = False
     ):
         if self._client is None:
             return await self.async_step_github_config()
@@ -254,6 +267,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._entry_data[CONF_GITHUB_AUTH_SCOPES] = user_input.get(
                 CONF_GITHUB_AUTH_SCOPES, "read:user"
             )
+            self._entry_data["github_force_restart"] = force_restart
             self._device_flow_details = None
             return await self.async_step_github_device_flow()
 
@@ -312,11 +326,18 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 status_message = "A GitHub device authorization is already pending."
             else:
                 try:
-                    self._device_flow_details = (
-                        await self._client.async_start_github_device_flow(
-                            scopes=self._entry_data.get(CONF_GITHUB_AUTH_SCOPES)
+                    if self._entry_data.pop("github_force_restart", False):
+                        self._device_flow_details = (
+                            await self._client.async_restart_github_device_flow(
+                                scopes=self._entry_data.get(CONF_GITHUB_AUTH_SCOPES)
+                            )
                         )
-                    )
+                    else:
+                        self._device_flow_details = (
+                            await self._client.async_start_github_device_flow(
+                                scopes=self._entry_data.get(CONF_GITHUB_AUTH_SCOPES)
+                            )
+                        )
                 except CopilotBridgeApiError as err:
                     errors["base"] = "device_flow_error"
                     status_message = err.message
@@ -452,6 +473,8 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         action_options = [
             (AUTH_METHOD_DEVICE_FLOW, "Sign in with GitHub in the browser"),
+            (ACTION_RESTART_GITHUB_DEVICE_FLOW, "Restart browser sign-in from scratch"),
+            (ACTION_CLEAR_GITHUB_AUTH, "Clear bridge GitHub auth"),
             (AUTH_METHOD_ADDON_CONFIG, "Use GitHub auth already configured on the bridge"),
             (AUTH_METHOD_MANUAL_TOKEN, "Paste a GitHub token"),
             (AUTH_METHOD_NONE, "Skip GitHub setup for now"),
@@ -712,15 +735,17 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
 
             if selected_action == AUTH_METHOD_MANUAL_TOKEN:
                 return await self.async_step_manual_token()
-            if selected_action == AUTH_METHOD_DEVICE_FLOW:
-                return await self.async_step_github_device_flow_options()
+            if selected_action in {AUTH_METHOD_DEVICE_FLOW, ACTION_RESTART_GITHUB_DEVICE_FLOW}:
+                return await self.async_step_github_device_flow_options(
+                    force_restart=(selected_action == ACTION_RESTART_GITHUB_DEVICE_FLOW)
+                )
 
             return await self.async_step_mcp_config()
 
         return self._show_options_init_form(errors)
 
     async def async_step_github_device_flow_options(
-        self, user_input: dict | None = None
+        self, user_input: dict | None = None, *, force_restart: bool = False
     ):
         if self._client is None:
             return await self.async_step_init()
@@ -733,6 +758,7 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
                     self._config_entry.data.get(CONF_GITHUB_AUTH_SCOPES, "read:user"),
                 ),
             )
+            self._options["github_force_restart"] = force_restart
             self._device_flow_details = None
             return await self.async_step_github_device_flow()
 
@@ -796,19 +822,34 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
                 status_message = "A GitHub device authorization is already pending."
             else:
                 try:
-                    self._device_flow_details = (
-                        await self._client.async_start_github_device_flow(
-                            scopes=self._options.get(
-                                CONF_GITHUB_AUTH_SCOPES,
-                                self._config_entry.options.get(
+                    if self._options.pop("github_force_restart", False):
+                        self._device_flow_details = (
+                            await self._client.async_restart_github_device_flow(
+                                scopes=self._options.get(
                                     CONF_GITHUB_AUTH_SCOPES,
-                                    self._config_entry.data.get(
-                                        CONF_GITHUB_AUTH_SCOPES, "read:user"
+                                    self._config_entry.options.get(
+                                        CONF_GITHUB_AUTH_SCOPES,
+                                        self._config_entry.data.get(
+                                            CONF_GITHUB_AUTH_SCOPES, "read:user"
+                                        ),
                                     ),
-                                ),
+                                )
                             )
                         )
-                    )
+                    else:
+                        self._device_flow_details = (
+                            await self._client.async_start_github_device_flow(
+                                scopes=self._options.get(
+                                    CONF_GITHUB_AUTH_SCOPES,
+                                    self._config_entry.options.get(
+                                        CONF_GITHUB_AUTH_SCOPES,
+                                        self._config_entry.data.get(
+                                            CONF_GITHUB_AUTH_SCOPES, "read:user"
+                                        ),
+                                    ),
+                                )
+                            )
+                        )
                 except CopilotBridgeApiError as err:
                     errors["base"] = "device_flow_error"
                     status_message = err.message
@@ -973,6 +1014,7 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
 
         action_options = [
             (AUTH_METHOD_DEVICE_FLOW, "Sign in with GitHub in the browser"),
+            (ACTION_RESTART_GITHUB_DEVICE_FLOW, "Restart browser sign-in from scratch"),
             (ACTION_KEEP_CURRENT_AUTH, "Keep current GitHub settings"),
             (AUTH_METHOD_ADDON_CONFIG, "Use GitHub auth already configured on the bridge"),
             (AUTH_METHOD_MANUAL_TOKEN, "Paste a GitHub token"),

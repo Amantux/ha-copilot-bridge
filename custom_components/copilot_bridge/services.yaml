@@ -100,3 +100,21 @@ clear_github_auth:
       selector:
         text:
 
+
+restart_github_device_flow:
+  name: Restart GitHub browser sign-in flow
+  description: Clears any pending GitHub device flow and starts a new one.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry to target.
+      required: false
+      selector:
+        text:
+    scopes:
+      name: OAuth scopes
+      description: Optional GitHub OAuth scopes for the restarted device flow.
+      required: false
+      selector:
+        text:
+
