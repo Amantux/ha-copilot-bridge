@@ -391,6 +391,57 @@ def _gh_auth_error_message(returncode: int | None, output: str) -> str:
     return f"GitHub CLI auth exited with status {returncode}."
 
 
+def _gh_auth_login_command_variants(requested_scopes: str) -> list[list[str]]:
+    preferred = [
+        "gh",
+        "auth",
+        "login",
+        "--hostname",
+        GH_HOST,
+        "--git-protocol",
+        "https",
+    ]
+    fallback = [
+        "gh",
+        "auth",
+        "login",
+        "--hostname",
+        GH_HOST,
+    ]
+    if requested_scopes:
+        preferred.extend(["--scopes", requested_scopes])
+        fallback.extend(["--scopes", requested_scopes])
+    return [preferred, fallback]
+
+
+def _gh_auth_start_failed_due_to_args(output: str) -> bool:
+    lower_output = output.lower()
+    return (
+        "unknown flag" in lower_output
+        or "unknown shorthand flag" in lower_output
+        or "accepts" in lower_output
+        or "invalid argument" in lower_output
+    )
+
+
+def _spawn_gh_auth_process_unlocked(command: list[str]) -> None:
+    global GH_AUTH_MASTER_FD, GH_AUTH_OUTPUT, GH_AUTH_PROCESS
+    master_fd, slave_fd = pty.openpty()
+    process = subprocess.Popen(
+        command,
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        env=_gh_env(),
+        close_fds=True,
+    )
+    os.close(slave_fd)
+    GH_AUTH_MASTER_FD = master_fd
+    GH_AUTH_OUTPUT = ""
+    GH_AUTH_PROCESS = process
+    LOGGER.info("Spawned GitHub CLI auth process: pid=%s command=%s", process.pid, command)
+
+
 def _get_gh_cli_token() -> str:
     result = subprocess.run(
         ["gh", "auth", "token", "--hostname", GH_HOST],
@@ -890,40 +941,15 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
 
         _cleanup_gh_auth_session_unlocked(stop_process=True)
         _ensure_private_directory(GH_CONFIG_DIR)
-        master_fd, slave_fd = pty.openpty()
         # Use the standard interactive device code flow — the same flow used by
         # GitHub Copilot CLI. Do NOT use --web: that forces a PKCE localhost-redirect
         # flow which cannot complete inside a headless container. Without --web, gh
         # shows an "authenticate" prompt, we select "Login with a web browser" (Enter),
         # and gh switches to the GitHub device activation flow at
         # https://github.com/login/device with a proper one-time code.
-        command = [
-            "gh",
-            "auth",
-            "login",
-            "--hostname",
-            GH_HOST,
-            "--git-protocol",
-            "https",
-            "--skip-ssh-key",
-            "--insecure-storage",
-        ]
-        if requested_scopes:
-            command.extend(["--scopes", requested_scopes])
-        process = subprocess.Popen(
-            command,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            env=_gh_env(),
-            close_fds=True,
-        )
-        os.close(slave_fd)
-
-        GH_AUTH_MASTER_FD = master_fd
-        GH_AUTH_OUTPUT = ""
-        GH_AUTH_PROCESS = process
-        LOGGER.info("Spawned GitHub CLI auth process: pid=%s command=%s", process.pid, command)
+        command_variants = _gh_auth_login_command_variants(requested_scopes)
+        command = command_variants.pop(0)
+        _spawn_gh_auth_process_unlocked(command)
 
     # Drive the interactive auth prompt then wait for the device code.
     # Stage 1: gh asks "How would you like to authenticate?"
@@ -948,7 +974,22 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
             with GH_AUTH_LOCK:
                 failure_output = _read_gh_auth_output_unlocked()
                 _cleanup_gh_auth_session_unlocked(stop_process=False)
+                should_retry_with_fallback = bool(
+                    command_variants
+                    and _gh_auth_start_failed_due_to_args(failure_output)
+                )
+                if should_retry_with_fallback:
+                    command = command_variants.pop(0)
+                    _spawn_gh_auth_process_unlocked(command)
             message = _gh_auth_error_message(returncode, failure_output)
+            if should_retry_with_fallback:
+                LOGGER.warning(
+                    "Retrying GitHub CLI auth startup with fallback command after failure: returncode=%s message=%s fallback=%s",
+                    returncode,
+                    message,
+                    command,
+                )
+                continue
             LOGGER.error(
                 "GitHub CLI browser auth failed to start: returncode=%s message=%s",
                 returncode,
