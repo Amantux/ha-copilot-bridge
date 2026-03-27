@@ -168,12 +168,10 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_user()
 
         if user_input is not None:
-            return await self.async_step_github_config()
+            return await self.async_step_mcp_config()
 
         health = self._bridge_health or {}
-        github_auth = health.get("github_auth") or {}
         mcp = ((health.get("mcp") or {}).get("home_assistant") or {})
-        storage = github_auth.get("storage") or {}
         return self.async_show_form(
             step_id="bridge_connection_test",
             data_schema=vol.Schema({}),
@@ -181,15 +179,6 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "service": str(health.get("service", "copilot_bridge")),
                 "version": str(health.get("version", "unknown")),
-                "github_browser_auth_status": self._format_browser_signin_status(
-                    github_auth
-                ),
-                "github_token_status": (
-                    "Configured"
-                    if github_auth.get("configured_token_present")
-                    else "Not configured"
-                ),
-                "github_auth_storage": self._format_auth_storage_status(storage),
                 "mcp_status": (
                     "Configured"
                     if mcp.get("configured")
@@ -554,8 +543,6 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _format_browser_signin_status(self, github_status: dict[str, Any]) -> str:
         if github_status.get("browser_auth_supported"):
             backend = github_status.get("browser_auth_backend")
-            if backend == "gh_cli":
-                return "Available via GitHub CLI"
             if backend == "oauth_app":
                 return "Available via OAuth app"
             return "Available"
@@ -563,7 +550,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def _resolve_existing_auth_method(self) -> str:
         auth_mode = (self._github_auth_status or {}).get("auth_mode")
-        if auth_mode in {"device_flow", "gh_cli"}:
+        if auth_mode == "device_flow":
             return AUTH_METHOD_DEVICE_FLOW
         if auth_mode == "manual_token":
             return AUTH_METHOD_MANUAL_TOKEN
@@ -674,75 +661,13 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
         self._options: dict[str, Any] = dict(config_entry.options)
 
     async def async_step_init(self, user_input: dict | None = None):
-        errors: dict[str, str] = {}
-
         if self._client is None:
             self._client = _create_bridge_client(
                 self.hass, self._config_entry.data, self._config_entry.options
             )
         if self._bridge_health is None:
             self._bridge_health = await self._async_fetch_bridge_health()
-
-        self._github_auth_status = await self._async_fetch_github_auth_status()
-
-        if user_input is not None:
-            selected_action = user_input[CONF_GITHUB_AUTH_ACTION]
-            bridge_has_configured_token = bool(
-                self._github_auth_status
-                and self._github_auth_status.get("configured_token_present")
-            )
-
-            if selected_action == ACTION_KEEP_CURRENT_AUTH:
-                return await self.async_step_mcp_config()
-
-            if selected_action == ACTION_REUSE_EXISTING_AUTH:
-                self._options[CONF_GITHUB_AUTH_METHOD] = (
-                    self._resolve_existing_auth_method()
-                )
-                return await self.async_step_mcp_config()
-
-            if selected_action == ACTION_CLEAR_GITHUB_AUTH:
-                try:
-                    await self._client.async_clear_github_auth()
-                except CopilotBridgeApiError:
-                    errors["base"] = "clear_auth_failed"
-                else:
-                    self._github_auth_status = await self._async_fetch_github_auth_status()
-                    self._options[CONF_GITHUB_AUTH_METHOD] = (
-                        self._resolve_existing_auth_method()
-                        if self._github_auth_status
-                        and self._github_auth_status.get("authenticated")
-                        else AUTH_METHOD_NONE
-                    )
-                    return await self.async_step_mcp_config()
-
-            self._options[CONF_GITHUB_AUTH_METHOD] = selected_action
-
-            if selected_action == AUTH_METHOD_ADDON_CONFIG and not bridge_has_configured_token:
-                errors["base"] = "bridge_auth_not_configured"
-
-            if (
-                selected_action == AUTH_METHOD_DEVICE_FLOW
-                and not (
-                    self._github_auth_status
-                    and self._github_auth_status.get("browser_auth_supported")
-                )
-            ):
-                errors["base"] = "device_flow_not_available"
-
-            if errors:
-                return self._show_options_init_form(errors)
-
-            if selected_action == AUTH_METHOD_MANUAL_TOKEN:
-                return await self.async_step_manual_token()
-            if selected_action in {AUTH_METHOD_DEVICE_FLOW, ACTION_RESTART_GITHUB_DEVICE_FLOW}:
-                return await self.async_step_github_device_flow_options(
-                    force_restart=(selected_action == ACTION_RESTART_GITHUB_DEVICE_FLOW)
-                )
-
-            return await self.async_step_mcp_config()
-
-        return self._show_options_init_form(errors)
+        return await self.async_step_mcp_config(user_input)
 
     async def async_step_github_device_flow_options(
         self, user_input: dict | None = None, *, force_restart: bool = False
@@ -1094,7 +1019,7 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
 
     def _resolve_existing_auth_method(self) -> str:
         auth_mode = (self._github_auth_status or {}).get("auth_mode")
-        if auth_mode in {"device_flow", "gh_cli"}:
+        if auth_mode == "device_flow":
             return AUTH_METHOD_DEVICE_FLOW
         if auth_mode == "manual_token":
             return AUTH_METHOD_MANUAL_TOKEN

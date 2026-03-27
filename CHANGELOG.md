@@ -1,7 +1,7 @@
 # Changelog
 
 ## [0.1.12] - 2026-03-27
-- Make GitHub CLI auth startup more resilient by retrying with a fallback `gh auth login` command when argument parsing fails.
+- Simplify GitHub auth flow to focus on OAuth device flow and token-based auth.
 - Fix Home Assistant Supervisor discovery mapping by aligning the integration `hassio` slug with the add-on slug.
 - Add repository consistency tests for add-on discovery slug wiring and mirrored runtime server files.
 

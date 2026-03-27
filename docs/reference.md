@@ -60,7 +60,7 @@ The setup flow now also:
 
 - inspects current bridge auth state
 - can reuse an existing authenticated GitHub session
-- prefers bridge-managed GitHub CLI browser sign-in when available
+- supports bridge-managed OAuth device flow when configured
 - blocks browser sign-in only when the bridge has no supported browser-auth backend
 - blocks the "use bridge-configured auth" path when the bridge does not actually have a configured token
 - resumes an already pending device flow when possible
