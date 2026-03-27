@@ -19,6 +19,7 @@ from .const import (
     SERVICE_ASK,
     SERVICE_GET_GITHUB_AUTH_STATUS,
     SERVICE_POLL_GITHUB_DEVICE_FLOW,
+    SERVICE_RESTART_GITHUB_DEVICE_FLOW,
     SERVICE_SET_GITHUB_TOKEN,
     SERVICE_START_GITHUB_DEVICE_FLOW,
 )
@@ -77,6 +78,12 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         client = _resolve_client(hass, call.data.get("entry_id"))
         return await client.async_poll_github_device_flow()
 
+    async def handle_restart_github_device_flow(call: ServiceCall) -> ServiceResponse:
+        client = _resolve_client(hass, call.data.get("entry_id"))
+        return await client.async_restart_github_device_flow(
+            scopes=call.data.get("scopes")
+        )
+
     async def handle_set_github_token(call: ServiceCall) -> ServiceResponse:
         client = _resolve_client(hass, call.data.get("entry_id"))
         return await client.async_set_github_token(token=call.data["token"])
@@ -111,6 +118,13 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         SERVICE_POLL_GITHUB_DEVICE_FLOW,
         handle_poll_github_device_flow,
         schema=ENTRY_ONLY_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESTART_GITHUB_DEVICE_FLOW,
+        handle_restart_github_device_flow,
+        schema=START_GITHUB_DEVICE_FLOW_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
