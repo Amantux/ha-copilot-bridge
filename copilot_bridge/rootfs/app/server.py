@@ -8,16 +8,26 @@ import pty
 import re
 import select
 import shutil
+import socket
 import subprocess
 import threading
 import time
+import importlib.util
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib import error, parse, request
 
 
-BRIDGE_VERSION = "0.1.8"
+if importlib.util.find_spec("zeroconf") is not None:
+    from zeroconf import IPVersion, ServiceInfo, Zeroconf
+else:
+    IPVersion = None
+    ServiceInfo = None
+    Zeroconf = None
+
+
+BRIDGE_VERSION = "0.1.9"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 CONFIGURED_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
@@ -57,6 +67,13 @@ AUTH_STATE_PATH = Path(
 GH_CONFIG_DIR = Path(os.getenv("GH_CONFIG_DIR", str(AUTH_STATE_PATH.parent / "gh")))
 GH_HOST = os.getenv("GH_HOST", "github.com").strip() or "github.com"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
+ENABLE_ZEROCONF_DISCOVERY = (
+    os.getenv("ENABLE_ZEROCONF_DISCOVERY", "true").strip().lower() == "true"
+)
+ZEROCONF_SERVICE_TYPE = "_copilot-bridge._tcp.local."
+ZEROCONF_SERVICE_NAME = (
+    os.getenv("ZEROCONF_SERVICE_NAME", "Copilot Bridge").strip() or "Copilot Bridge"
+)
 AUTH_STATE_LOAD_ERROR: str | None = None
 GH_AUTH_LOCK = threading.Lock()
 GH_AUTH_PROCESS: subprocess.Popen[bytes] | None = None
@@ -71,6 +88,8 @@ COPILOT_TOKEN_EXCHANGE_URL = f"https://api.github.com/copilot_internal/v2/token"
 COPILOT_TOKEN_REFRESH_BUFFER = 120  # seconds before expiry to refresh
 COPILOT_TOKEN_CACHE: dict[str, Any] = {}
 COPILOT_TOKEN_LOCK = threading.Lock()
+ZEROCONF_RUNTIME: Any = None
+ZEROCONF_SERVICE_INFO: Any = None
 
 
 def _resolve_log_level(level_name: str) -> int:
@@ -398,6 +417,80 @@ def _recover_gh_cli_auth_if_needed() -> dict[str, Any] | None:
 
 def _resolved_home_assistant_mcp_bearer_token() -> str:
     return HOME_ASSISTANT_MCP_BEARER_TOKEN or HOME_ASSISTANT_MCP_API_KEY
+
+
+def _local_ipv4_addresses() -> list[str]:
+    addresses: set[str] = set()
+    hostname = socket.gethostname()
+
+    for info in socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM):
+        ip = info[4][0]
+        if not ip.startswith("127."):
+            addresses.add(ip)
+
+    if not addresses:
+        try:
+            fallback_ip = socket.gethostbyname(hostname)
+        except OSError:
+            fallback_ip = ""
+        if fallback_ip and not fallback_ip.startswith("127."):
+            addresses.add(fallback_ip)
+
+    return sorted(addresses)
+
+
+def _register_zeroconf_service() -> None:
+    global ZEROCONF_RUNTIME, ZEROCONF_SERVICE_INFO
+
+    if not ENABLE_ZEROCONF_DISCOVERY:
+        LOGGER.info("Zeroconf discovery disabled by configuration")
+        return
+    if Zeroconf is None or ServiceInfo is None or IPVersion is None:
+        LOGGER.info("zeroconf dependency not installed; discovery advertisement disabled")
+        return
+
+    addresses = _local_ipv4_addresses()
+    if not addresses:
+        LOGGER.warning("No non-loopback IPv4 address found; zeroconf advertisement skipped")
+        return
+
+    instance_name = f"{ZEROCONF_SERVICE_NAME}.{ZEROCONF_SERVICE_TYPE}"
+    service_info = ServiceInfo(
+        type_=ZEROCONF_SERVICE_TYPE,
+        name=instance_name,
+        addresses=[socket.inet_aton(ip) for ip in addresses],
+        port=PORT,
+        properties={
+            b"path": b"/health",
+            b"version": BRIDGE_VERSION.encode("utf-8"),
+        },
+        server=f"{socket.gethostname()}.local.",
+    )
+    zeroconf_runtime = Zeroconf(ip_version=IPVersion.V4Only)
+    zeroconf_runtime.register_service(service_info)
+    ZEROCONF_RUNTIME = zeroconf_runtime
+    ZEROCONF_SERVICE_INFO = service_info
+    LOGGER.info(
+        "Registered zeroconf service name=%s type=%s port=%s addresses=%s",
+        instance_name,
+        ZEROCONF_SERVICE_TYPE,
+        PORT,
+        addresses,
+    )
+
+
+def _unregister_zeroconf_service() -> None:
+    global ZEROCONF_RUNTIME, ZEROCONF_SERVICE_INFO
+
+    if ZEROCONF_RUNTIME is None or ZEROCONF_SERVICE_INFO is None:
+        return
+    try:
+        ZEROCONF_RUNTIME.unregister_service(ZEROCONF_SERVICE_INFO)
+    finally:
+        ZEROCONF_RUNTIME.close()
+        ZEROCONF_RUNTIME = None
+        ZEROCONF_SERVICE_INFO = None
+        LOGGER.info("Unregistered zeroconf service")
 
 
 def _home_assistant_mcp_uses_private_url() -> bool:
@@ -1679,6 +1772,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     server = ThreadingHTTPServer(("0.0.0.0", PORT), BridgeHandler)
+    _register_zeroconf_service()
     LOGGER.info(
         "copilot_bridge listening on :%s version=%s log_level=%s auth_backend=%s gh_cli=%s oauth_client=%s auth_state_path=%s gh_config_dir=%s",
         PORT,
@@ -1690,7 +1784,10 @@ def main() -> None:
         AUTH_STATE_PATH,
         GH_CONFIG_DIR,
     )
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        _unregister_zeroconf_service()
 
 
 if __name__ == "__main__":

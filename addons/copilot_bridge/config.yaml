@@ -1,6 +1,6 @@
 name: "Copilot Bridge"
 description: "Local GitHub Copilot bridge service for Home Assistant"
-version: "0.1.8"
+version: "0.1.9"
 slug: "home-assistant-copilot-bridge"
 init: false
 startup: services
@@ -28,6 +28,7 @@ options:
   enable_integration_discovery: true
   enable_hacs_discovery: true
   enable_tooling_discovery: true
+  enable_zeroconf_discovery: true
   enable_home_assistant_mcp: false
   home_assistant_mcp_url: ""
   home_assistant_mcp_bearer_token: ""
@@ -46,6 +47,7 @@ schema:
   enable_integration_discovery: bool?
   enable_hacs_discovery: bool?
   enable_tooling_discovery: bool?
+  enable_zeroconf_discovery: bool?
   enable_home_assistant_mcp: bool?
   home_assistant_mcp_url: str?
   home_assistant_mcp_bearer_token: password?

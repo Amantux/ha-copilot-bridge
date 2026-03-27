@@ -12,6 +12,7 @@ export ALLOW_FILESYSTEM_ACCESS="$(bashio::config 'allow_filesystem_access')"
 export ENABLE_INTEGRATION_DISCOVERY="$(bashio::config 'enable_integration_discovery')"
 export ENABLE_HACS_DISCOVERY="$(bashio::config 'enable_hacs_discovery')"
 export ENABLE_TOOLING_DISCOVERY="$(bashio::config 'enable_tooling_discovery')"
+export ENABLE_ZEROCONF_DISCOVERY="$(bashio::config 'enable_zeroconf_discovery')"
 export ENABLE_HOME_ASSISTANT_MCP="$(bashio::config 'enable_home_assistant_mcp')"
 export HOME_ASSISTANT_MCP_URL="$(bashio::config 'home_assistant_mcp_url')"
 export HOME_ASSISTANT_MCP_BEARER_TOKEN="$(bashio::config 'home_assistant_mcp_bearer_token')"
@@ -20,4 +21,3 @@ export ALLOWED_PATHS="$(bashio::config 'allowed_paths')"
 export LOG_LEVEL="$(bashio::config 'log_level')"
 
 exec python3 /app/server.py
-

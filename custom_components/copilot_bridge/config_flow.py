@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlparse
 
 import voluptuous as vol
 
+from homeassistant.components.zeroconf import ZeroconfServiceInfo
 from homeassistant import config_entries
 from homeassistant.const import CONF_API_KEY, CONF_HOST, CONF_PORT, CONF_URL
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -55,6 +57,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     _device_flow_details: dict[str, Any] | None = None
     _github_auth_status: dict[str, Any] | None = None
     _hassio_discovery: dict[str, Any] | None = None
+    _zeroconf_discovery: dict[str, Any] | None = None
 
     async def async_step_user(self, user_input: dict | None = None):
         errors: dict[str, str] = {}
@@ -90,6 +93,45 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self._async_handle_discovery_without_unique_id()
         self._hassio_discovery = discovery_info.config
         return await self.async_step_hassio_confirm()
+
+    async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo):
+        await self._async_handle_discovery_without_unique_id()
+        host = discovery_info.host.rstrip(".")
+        self._zeroconf_discovery = {
+            CONF_HOST: host,
+            CONF_PORT: int(discovery_info.port),
+            "name": discovery_info.name,
+        }
+        return await self.async_step_zeroconf_confirm()
+
+    async def async_step_zeroconf_confirm(self, user_input: dict | None = None):
+        errors: dict[str, str] = {}
+
+        if self._zeroconf_discovery is None:
+            return await self.async_step_user()
+
+        discovered_url = self._normalize_bridge_url(
+            f"http://{self._zeroconf_discovery[CONF_HOST]}:{self._zeroconf_discovery[CONF_PORT]}"
+        )
+
+        if user_input is not None:
+            initialized = await self._async_initialize_bridge(
+                url=discovered_url,
+                api_key=user_input.get(CONF_API_KEY),
+            )
+            if initialized:
+                return await self.async_step_bridge_connection_test()
+            errors["base"] = "cannot_connect"
+
+        return self.async_show_form(
+            step_id="zeroconf_confirm",
+            data_schema=vol.Schema({vol.Optional(CONF_API_KEY): str}),
+            errors=errors,
+            description_placeholders={
+                "name": str(self._zeroconf_discovery.get("name", "Copilot Bridge")),
+                "url": discovered_url,
+            },
+        )
 
     async def async_step_hassio_confirm(self, user_input: dict | None = None):
         errors: dict[str, str] = {}
@@ -279,6 +321,16 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors["base"] = "device_flow_error"
                     status_message = err.message
 
+        if (
+            not errors
+            and user_input is None
+            and self._device_flow_details is not None
+            and not self._device_flow_details.get("user_code")
+        ):
+            status_message = await self._async_refresh_device_flow_details(
+                fallback_message=status_message
+            )
+
         if not errors and user_input is not None:
             try:
                 result = await self._client.async_poll_github_device_flow()
@@ -313,13 +365,42 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    async def _async_refresh_device_flow_details(self, *, fallback_message: str) -> str:
+        if self._client is None:
+            return fallback_message
+
+        status_message = fallback_message
+        # Give the bridge a short window to extract and expose the user code
+        # from the running GitHub auth process before rendering "Unavailable".
+        for attempt in range(3):
+            try:
+                result = await self._client.async_poll_github_device_flow()
+            except CopilotBridgeApiError as err:
+                return err.message or fallback_message
+
+            self._device_flow_details = {
+                **(self._device_flow_details or {}),
+                **result,
+            }
+            status_message = str(result.get("message", status_message))
+            if self._device_flow_details.get("user_code"):
+                break
+            if attempt < 2:
+                await asyncio.sleep(1)
+
+        return status_message
+
     async def async_step_mcp_config(self, user_input: dict | None = None):
         if self._client is None:
             return await self.async_step_user()
 
+        default_use_mcp = self._entry_data.get(
+            CONF_USE_HOME_ASSISTANT_MCP,
+            self._bridge_mcp_enabled_by_default(),
+        )
         if user_input is not None:
             self._entry_data[CONF_USE_HOME_ASSISTANT_MCP] = user_input.get(
-                CONF_USE_HOME_ASSISTANT_MCP, False
+                CONF_USE_HOME_ASSISTANT_MCP, default_use_mcp
             )
             self._entry_data[CONF_HOME_ASSISTANT_MCP_SERVER_NAME] = user_input.get(
                 CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
@@ -333,7 +414,7 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Optional(
                         CONF_USE_HOME_ASSISTANT_MCP,
-                        default=self._entry_data.get(CONF_USE_HOME_ASSISTANT_MCP, False),
+                        default=default_use_mcp,
                     ): bool,
                     vol.Optional(
                         CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
@@ -473,6 +554,12 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data=self._entry_data,
         )
 
+    def _bridge_mcp_enabled_by_default(self) -> bool:
+        mcp = ((self._bridge_health or {}).get("mcp") or {}).get("home_assistant") or {}
+        if "enabled_by_default" in mcp:
+            return bool(mcp.get("enabled_by_default"))
+        return bool(mcp.get("configured"))
+
     async def _async_initialize_bridge(
         self,
         *,
@@ -528,7 +615,9 @@ class CopilotBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_ENABLE_TOOLING_DISCOVERY,
             DEFAULT_ENABLE_TOOLING_DISCOVERY,
         )
-        self._entry_data.setdefault(CONF_USE_HOME_ASSISTANT_MCP, False)
+        self._entry_data.setdefault(
+            CONF_USE_HOME_ASSISTANT_MCP, self._bridge_mcp_enabled_by_default()
+        )
         self._entry_data.setdefault(
             CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
             DEFAULT_HOME_ASSISTANT_MCP_SERVER_NAME,
@@ -556,6 +645,7 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
         self._client: CopilotBridgeApiClient | None = None
+        self._bridge_health: dict[str, Any] | None = None
         self._device_flow_details: dict[str, Any] | None = None
         self._github_auth_status: dict[str, Any] | None = None
         self._options: dict[str, Any] = dict(config_entry.options)
@@ -567,6 +657,8 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
             self._client = _create_bridge_client(
                 self.hass, self._config_entry.data, self._config_entry.options
             )
+        if self._bridge_health is None:
+            self._bridge_health = await self._async_fetch_bridge_health()
 
         self._github_auth_status = await self._async_fetch_github_auth_status()
 
@@ -699,7 +791,7 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
             if self._github_auth_status:
                 pending_device_flow = self._github_auth_status.get("pending_device_flow")
 
-            if pending_device_flow:
+            if pending_device_flow and pending_device_flow.get("user_code"):
                 self._device_flow_details = pending_device_flow
                 status_message = "A GitHub device authorization is already pending."
             else:
@@ -720,6 +812,16 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
                 except CopilotBridgeApiError as err:
                     errors["base"] = "device_flow_error"
                     status_message = err.message
+
+        if (
+            not errors
+            and user_input is None
+            and self._device_flow_details is not None
+            and not self._device_flow_details.get("user_code")
+        ):
+            status_message = await self._async_refresh_device_flow_details(
+                fallback_message=status_message
+            )
 
         if not errors and user_input is not None:
             try:
@@ -762,14 +864,40 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
             },
         )
 
+    async def _async_refresh_device_flow_details(self, *, fallback_message: str) -> str:
+        if self._client is None:
+            return fallback_message
+
+        status_message = fallback_message
+        for attempt in range(3):
+            try:
+                result = await self._client.async_poll_github_device_flow()
+            except CopilotBridgeApiError as err:
+                return err.message or fallback_message
+
+            self._device_flow_details = {
+                **(self._device_flow_details or {}),
+                **result,
+            }
+            status_message = str(result.get("message", status_message))
+            if self._device_flow_details.get("user_code"):
+                break
+            if attempt < 2:
+                await asyncio.sleep(1)
+
+        return status_message
+
     async def async_step_mcp_config(self, user_input: dict | None = None):
+        default_use_mcp = self._options.get(
+            CONF_USE_HOME_ASSISTANT_MCP,
+            self._config_entry.data.get(
+                CONF_USE_HOME_ASSISTANT_MCP, self._bridge_mcp_enabled_by_default()
+            ),
+        )
         if user_input is not None:
             self._options[CONF_USE_HOME_ASSISTANT_MCP] = user_input.get(
                 CONF_USE_HOME_ASSISTANT_MCP,
-                self._config_entry.options.get(
-                    CONF_USE_HOME_ASSISTANT_MCP,
-                    self._config_entry.data.get(CONF_USE_HOME_ASSISTANT_MCP, False),
-                ),
+                default_use_mcp,
             )
             self._options[CONF_HOME_ASSISTANT_MCP_SERVER_NAME] = user_input.get(
                 CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
@@ -789,10 +917,7 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Optional(
                         CONF_USE_HOME_ASSISTANT_MCP,
-                        default=self._options.get(
-                            CONF_USE_HOME_ASSISTANT_MCP,
-                            self._config_entry.data.get(CONF_USE_HOME_ASSISTANT_MCP, False),
-                        ),
+                        default=default_use_mcp,
                     ): bool,
                     vol.Optional(
                         CONF_HOME_ASSISTANT_MCP_SERVER_NAME,
@@ -817,6 +942,21 @@ class CopilotBridgeOptionsFlow(config_entries.OptionsFlow):
             return await self._client.async_auth_status()
         except CopilotBridgeApiError:
             return None
+
+    async def _async_fetch_bridge_health(self) -> dict[str, Any] | None:
+        if self._client is None:
+            return None
+
+        try:
+            return await self._client.async_health()
+        except CopilotBridgeApiError:
+            return None
+
+    def _bridge_mcp_enabled_by_default(self) -> bool:
+        mcp = ((self._bridge_health or {}).get("mcp") or {}).get("home_assistant") or {}
+        if "enabled_by_default" in mcp:
+            return bool(mcp.get("enabled_by_default"))
+        return bool(mcp.get("configured"))
 
     def _show_options_init_form(self, errors: dict[str, str]):
         github_status = self._github_auth_status or {}
@@ -985,4 +1125,3 @@ def _create_bridge_client(
         ),
         session=async_get_clientsession(hass),
     )
-

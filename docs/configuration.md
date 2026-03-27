@@ -16,6 +16,7 @@ allow_filesystem_access: false
 enable_integration_discovery: true
 enable_hacs_discovery: true
 enable_tooling_discovery: true
+enable_zeroconf_discovery: true
 enable_home_assistant_mcp: false
 home_assistant_mcp_url: ""
 home_assistant_mcp_bearer_token: ""
@@ -37,6 +38,7 @@ log_level: "info"
 - `enable_integration_discovery`: allow recommendations for official Home Assistant integrations
 - `enable_hacs_discovery`: allow recommendations for HACS integrations, cards, and add-ons
 - `enable_tooling_discovery`: allow recommendations for Home Assistant tooling and operational guidance
+- `enable_zeroconf_discovery`: advertise the bridge via mDNS/zeroconf so Home Assistant can auto-discover it
 - `enable_home_assistant_mcp`: enable MCP by default for bridge requests
 - `home_assistant_mcp_url`: MCP endpoint URL; for the Home Assistant MCP add-on this should usually be the full secret URL including the `/private_...` path
 - `home_assistant_mcp_bearer_token`: optional bearer token for non-add-on or custom MCP deployments that require an Authorization header
@@ -139,6 +141,30 @@ Startup precedence:
 
 - if `GITHUB_TOKEN` is set, the bridge now treats that configured token as the active auth source on startup
 - if `GITHUB_TOKEN` is not set, the bridge falls back to persisted auth state from `GITHUB_AUTH_STATE_PATH`
+
+### End-to-end setup: Home Assistant integration + standalone container
+
+Use this sequence when Home Assistant and the bridge run as separate containers:
+
+1. Run the bridge container with:
+   - a stable network name reachable by Home Assistant (for example `copilot-bridge`)
+   - `BRIDGE_API_KEY` (optional but recommended)
+   - `GITHUB_AUTH_STATE_PATH` on a persistent volume
+2. Confirm bridge readiness from inside Home Assistant's network:
+   - `GET /health` should return `status: ok`
+3. Add the integration in Home Assistant:
+   - URL: `http://copilot-bridge:8099`
+   - API key: value of `BRIDGE_API_KEY` (if set)
+4. In the GitHub step, choose **Sign in with GitHub in the browser**.
+5. Open the displayed `verification_uri`, enter `user_code`, and approve access.
+6. Submit the same step again until it reports authorized.
+7. Verify with `copilot_bridge.get_github_auth_status` service or `GET /auth/status`.
+
+If browser sign-in is unavailable, the bridge will show `browser_auth_supported: false` in `/health` and `/auth/status`. In that case:
+
+- install `gh` in the bridge image, or
+- set `GITHUB_OAUTH_CLIENT_ID` for OAuth-app device flow, or
+- use manual token setup.
 
 The bridge now exposes redacted auth-storage metadata in `/health` and `/auth/status` so you can confirm:
 
