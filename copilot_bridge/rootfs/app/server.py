@@ -343,6 +343,17 @@ def _extract_gh_auth_details(output: str) -> dict[str, Any]:
     }
 
 
+def _gh_output_requests_enter(cleaned_output: str) -> bool:
+    lower_output = cleaned_output.lower()
+    return (
+        "press enter to open" in lower_output
+        or "press enter to open github.com" in lower_output
+        or "press enter to open the browser" in lower_output
+        or "press enter to continue" in lower_output
+        or "first copy your one-time code" in lower_output
+    )
+
+
 def _public_pending_device_flow(pending: dict[str, Any]) -> dict[str, Any]:
     return {
         "backend": pending.get("backend"),
@@ -982,12 +993,10 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
 
         if (
             not auth_prompt_answered
-            and git_prompt_answered
-            and git_prompt_answered_at is not None
-            and time.time() - git_prompt_answered_at > 0.75
+            and _gh_output_requests_enter(cleaned)
         ):
             LOGGER.info(
-                "Assuming GitHub CLI auth prompt is ready; pressing Enter for default"
+                "Answering GitHub CLI auth prompt: pressing Enter when requested"
             )
             with GH_AUTH_LOCK:
                 if GH_AUTH_MASTER_FD is not None:
