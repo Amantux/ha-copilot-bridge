@@ -4,13 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
-import pty
-import re
-import select
-import shutil
 import socket
-import subprocess
-import threading
 import time
 import importlib.util
 from http import HTTPStatus
@@ -64,8 +58,6 @@ HOME_ASSISTANT_MCP_API_KEY = os.getenv("HOME_ASSISTANT_MCP_API_KEY", "").strip()
 AUTH_STATE_PATH = Path(
     os.getenv("GITHUB_AUTH_STATE_PATH", "/config/copilot_bridge_github_auth.json")
 )
-GH_CONFIG_DIR = Path(os.getenv("GH_CONFIG_DIR", str(AUTH_STATE_PATH.parent / "gh")))
-GH_HOST = os.getenv("GH_HOST", "github.com").strip() or "github.com"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
 ENABLE_ZEROCONF_DISCOVERY = (
     os.getenv("ENABLE_ZEROCONF_DISCOVERY", "true").strip().lower() == "true"
@@ -75,13 +67,6 @@ ZEROCONF_SERVICE_NAME = (
     os.getenv("ZEROCONF_SERVICE_NAME", "Copilot Bridge").strip() or "Copilot Bridge"
 )
 AUTH_STATE_LOAD_ERROR: str | None = None
-GH_AUTH_LOCK = threading.Lock()
-GH_AUTH_PROCESS: subprocess.Popen[bytes] | None = None
-GH_AUTH_MASTER_FD: int | None = None
-GH_AUTH_OUTPUT = ""
-GH_DEVICE_CODE_PATTERN = re.compile(r"\b[A-Z0-9]{4}(?:-[A-Z0-9]{4})+\b")
-GH_DEVICE_URL_PATTERN = re.compile(r"https://[^\s)]+")
-ANSI_ESCAPE_PATTERN = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 
 COPILOT_API_BASE = "https://api.githubcopilot.com"
 COPILOT_TOKEN_EXCHANGE_URL = f"https://api.github.com/copilot_internal/v2/token"
@@ -209,27 +194,10 @@ AUTH_LOCK = threading.Lock()
 AUTH_STATE = _load_auth_state()
 
 
-def _gh_cli_available() -> bool:
-    return shutil.which("gh") is not None
-
-
 def _device_flow_backend() -> str:
-    if _gh_cli_available():
-        return "gh_cli"
     if GITHUB_OAUTH_CLIENT_ID:
         return "oauth_app"
     return "none"
-
-
-def _gh_env() -> dict[str, str]:
-    env = os.environ.copy()
-    env["GH_CONFIG_DIR"] = str(GH_CONFIG_DIR)
-    # Force plain-text terminal output so gh doesn't use cursor-positioning TUI
-    # (bubbletea/survey) that our ANSI stripper can't reliably reconstruct.
-    env["TERM"] = "dumb"
-    env["NO_COLOR"] = "1"
-    env["GH_NO_UPDATE_NOTIFIER"] = "1"
-    return env
 
 
 def _ensure_private_directory(path: Path) -> None:
@@ -247,251 +215,6 @@ def _ensure_private_file(path: Path) -> None:
         os.chmod(path, 0o600)
     except OSError as err:
         LOGGER.warning("Could not enforce 0600 permissions on %s: %s", path, err)
-
-
-def _trim_for_log(value: str, limit: int = 400) -> str:
-    if len(value) <= limit:
-        return value
-    return f"{value[:limit]}...(truncated)"
-
-
-def _sanitize_terminal_output(output: str) -> str:
-    cleaned = ANSI_ESCAPE_PATTERN.sub("", output).replace("\r", "\n")
-    cleaned_lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
-    return "\n".join(cleaned_lines)
-
-
-def _preview_gh_output(output: str, *, max_lines: int = 8) -> str:
-    cleaned = _sanitize_terminal_output(output)
-    if not cleaned:
-        return ""
-    lines = cleaned.splitlines()
-    return _trim_for_log("\n".join(lines[-max_lines:]), limit=800)
-
-
-def _log_gh_output_snapshot(context: str, output: str, *, level: int = logging.DEBUG) -> None:
-    details = _extract_gh_auth_details(output)
-    preview = _preview_gh_output(output)
-    LOGGER.log(
-        level,
-        "%s | gh output snapshot: len=%s has_code=%s has_url=%s preview=%r",
-        context,
-        len(output),
-        bool(details.get("user_code")),
-        bool(details.get("verification_uri")),
-        preview,
-    )
-
-
-def _cleanup_gh_auth_session_unlocked(*, stop_process: bool) -> None:
-    global GH_AUTH_MASTER_FD, GH_AUTH_OUTPUT, GH_AUTH_PROCESS
-
-    process = GH_AUTH_PROCESS
-    if process is not None:
-        LOGGER.info(
-            "Cleaning up GitHub auth session: pid=%s stop_process=%s running=%s",
-            process.pid,
-            stop_process,
-            process.poll() is None,
-        )
-    if process is not None and stop_process and process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=2)
-
-    if GH_AUTH_MASTER_FD is not None:
-        try:
-            os.close(GH_AUTH_MASTER_FD)
-        except OSError:
-            pass
-
-    GH_AUTH_MASTER_FD = None
-    GH_AUTH_PROCESS = None
-    GH_AUTH_OUTPUT = ""
-
-
-def _read_gh_auth_output_unlocked() -> str:
-    global GH_AUTH_OUTPUT
-
-    if GH_AUTH_MASTER_FD is None:
-        return GH_AUTH_OUTPUT
-
-    while True:
-        try:
-            readable, _, _ = select.select([GH_AUTH_MASTER_FD], [], [], 0)
-        except (OSError, ValueError):
-            break
-        if not readable:
-            break
-        try:
-            chunk = os.read(GH_AUTH_MASTER_FD, 4096)
-        except OSError as exc:
-            LOGGER.warning("PTY read error (master_fd=%s): %s", GH_AUTH_MASTER_FD, exc)
-            break
-        if not chunk:
-            break
-        GH_AUTH_OUTPUT += chunk.decode("utf-8", errors="replace")
-
-    if GH_AUTH_OUTPUT:
-        _log_gh_output_snapshot("Read GitHub CLI auth output", GH_AUTH_OUTPUT)
-
-    return GH_AUTH_OUTPUT
-
-
-def _extract_gh_auth_details(output: str) -> dict[str, Any]:
-    user_code = None
-    verification_uri = None
-
-    code_match = GH_DEVICE_CODE_PATTERN.search(output)
-    if code_match:
-        user_code = code_match.group(0)
-
-    for url in GH_DEVICE_URL_PATTERN.findall(output):
-        if "login/device" in url:
-            verification_uri = url.rstrip(".,)")
-            break
-
-    return {
-        "user_code": user_code,
-        "verification_uri": verification_uri or f"https://{GH_HOST}/login/device",
-    }
-
-
-def _gh_output_requests_enter(cleaned_output: str) -> bool:
-    lower_output = cleaned_output.lower()
-    return (
-        "press enter to open" in lower_output
-        or "press enter to open github.com" in lower_output
-        or "press enter to open the browser" in lower_output
-        or "press enter to continue" in lower_output
-        or "first copy your one-time code" in lower_output
-    )
-
-
-def _public_pending_device_flow(pending: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "backend": pending.get("backend"),
-        "user_code": pending.get("user_code"),
-        "verification_uri": pending.get("verification_uri"),
-        "expires_at": pending.get("expires_at"),
-        "interval": pending.get("interval"),
-        "scope": pending.get("scope"),
-    }
-
-
-def _gh_auth_error_message(returncode: int | None, output: str) -> str:
-    cleaned_output = " ".join(output.split())
-    if cleaned_output:
-        return cleaned_output[-300:]
-    if returncode is None:
-        return "GitHub CLI auth failed."
-    return f"GitHub CLI auth exited with status {returncode}."
-
-
-def _gh_auth_login_command_variants(requested_scopes: str) -> list[list[str]]:
-    preferred = [
-        "gh",
-        "auth",
-        "login",
-        "--hostname",
-        GH_HOST,
-        "--git-protocol",
-        "https",
-    ]
-    fallback = [
-        "gh",
-        "auth",
-        "login",
-        "--hostname",
-        GH_HOST,
-    ]
-    if requested_scopes:
-        preferred.extend(["--scopes", requested_scopes])
-        fallback.extend(["--scopes", requested_scopes])
-    return [preferred, fallback]
-
-
-def _gh_auth_start_failed_due_to_args(output: str) -> bool:
-    lower_output = output.lower()
-    return (
-        "unknown flag" in lower_output
-        or "unknown shorthand flag" in lower_output
-        or "accepts" in lower_output
-        or "invalid argument" in lower_output
-    )
-
-
-def _spawn_gh_auth_process_unlocked(command: list[str]) -> None:
-    global GH_AUTH_MASTER_FD, GH_AUTH_OUTPUT, GH_AUTH_PROCESS
-    master_fd, slave_fd = pty.openpty()
-    process = subprocess.Popen(
-        command,
-        stdin=slave_fd,
-        stdout=slave_fd,
-        stderr=slave_fd,
-        env=_gh_env(),
-        close_fds=True,
-    )
-    os.close(slave_fd)
-    GH_AUTH_MASTER_FD = master_fd
-    GH_AUTH_OUTPUT = ""
-    GH_AUTH_PROCESS = process
-    LOGGER.info("Spawned GitHub CLI auth process: pid=%s command=%s", process.pid, command)
-
-
-def _get_gh_cli_token() -> str:
-    result = subprocess.run(
-        ["gh", "auth", "token", "--hostname", GH_HOST],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        env=_gh_env(),
-        check=False,
-    )
-    token = result.stdout.strip()
-    if result.returncode != 0 or not token:
-        LOGGER.error(
-            "GitHub CLI token lookup failed: returncode=%s stderr=%r",
-            result.returncode,
-            _trim_for_log(result.stderr.strip(), limit=300),
-        )
-        raise BridgeError(
-            HTTPStatus.BAD_GATEWAY,
-            "gh_auth_token_unavailable",
-            result.stderr.strip() or "GitHub CLI did not return an auth token.",
-        )
-    LOGGER.info("Recovered GitHub CLI token from persisted auth state")
-    return token
-
-
-def _recover_gh_cli_auth_if_needed() -> dict[str, Any] | None:
-    if not _gh_cli_available() or not GH_CONFIG_DIR.exists():
-        return None
-
-    try:
-        token = _get_gh_cli_token()
-        user, scope = _fetch_github_user(token)
-    except (BridgeError, GitHubApiError):
-        LOGGER.warning("Unable to recover persisted GitHub CLI auth state")
-        return None
-
-    LOGGER.info(
-        "Recovered persisted GitHub CLI auth for user=%s scope=%s",
-        (user or {}).get("login"),
-        scope,
-    )
-    return _update_github_state(
-        access_token=token,
-        token_type="bearer",
-        scope=scope,
-        source="gh_cli",
-        user=user,
-        pending_device_flow=None,
-        last_error=None,
-    )
 
 
 def _resolved_home_assistant_mcp_bearer_token() -> str:
@@ -618,7 +341,6 @@ def _auth_storage_payload() -> dict[str, Any]:
         "directory_exists": directory.exists(),
         "directory_writable": os.access(writable_target, os.W_OK),
         "load_error": AUTH_STATE_LOAD_ERROR,
-        "gh_config_dir": str(GH_CONFIG_DIR),
     }
 
 
@@ -856,9 +578,6 @@ def _enrich_github_state_if_needed() -> dict[str, Any]:
     github = _get_github_state()
     access_token = github.get("access_token")
     if not access_token:
-        recovered = _recover_gh_cli_auth_if_needed()
-        if recovered is not None:
-            return recovered
         return github
 
     if github.get("user") and github.get("scope") is not None:
@@ -882,354 +601,6 @@ def _enrich_github_state_if_needed() -> dict[str, Any]:
     if github.get("scope") is None:
         updates["scope"] = scope
     return _update_github_state(**updates)
-
-
-def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
-    global GH_AUTH_MASTER_FD, GH_AUTH_OUTPUT, GH_AUTH_PROCESS
-
-    if not _gh_cli_available():
-        raise BridgeError(
-            HTTPStatus.BAD_REQUEST,
-            "gh_cli_not_available",
-            "GitHub CLI browser auth is not available on the bridge.",
-        )
-
-    requested_scopes = (scopes or GITHUB_OAUTH_SCOPES or "read:user").strip()
-    LOGGER.info(
-        "Starting GitHub CLI browser auth: scopes=%s host=%s config_dir=%s",
-        requested_scopes,
-        GH_HOST,
-        GH_CONFIG_DIR,
-    )
-
-    with GH_AUTH_LOCK:
-        if GH_AUTH_PROCESS is not None and GH_AUTH_PROCESS.poll() is None:
-            output = _read_gh_auth_output_unlocked()
-            existing_pending = _get_github_state().get("pending_device_flow") or {}
-            extracted = _extract_gh_auth_details(output)
-
-            # If the running process has been going for a while but still has no code,
-            # kill it and start fresh rather than returning a permanently-null code.
-            if not extracted.get("user_code") and not existing_pending.get("user_code"):
-                LOGGER.warning(
-                    "GitHub CLI auth process running but no code captured; restarting: pid=%s",
-                    GH_AUTH_PROCESS.pid,
-                )
-                _cleanup_gh_auth_session_unlocked(stop_process=True)
-                _clear_pending_device_flow(None)
-                # fall through to start a new process below
-            else:
-                pending = {
-                    **existing_pending,
-                    **extracted,
-                    "backend": "gh_cli",
-                    "scope": existing_pending.get("scope", requested_scopes),
-                    "interval": existing_pending.get("interval", 2),
-                    "last_poll_at": existing_pending.get("last_poll_at", 0),
-                }
-                LOGGER.warning(
-                    "GitHub CLI browser auth already running: pid=%s has_code=%s has_url=%s",
-                    GH_AUTH_PROCESS.pid,
-                    bool(pending.get("user_code")),
-                    bool(pending.get("verification_uri")),
-                )
-                _update_github_state(pending_device_flow=pending, last_error=None)
-                return {
-                    "status": "pending",
-                    **_public_pending_device_flow(pending),
-                }
-
-        _cleanup_gh_auth_session_unlocked(stop_process=True)
-        _ensure_private_directory(GH_CONFIG_DIR)
-        # Use the standard interactive device code flow — the same flow used by
-        # GitHub Copilot CLI. Do NOT use --web: that forces a PKCE localhost-redirect
-        # flow which cannot complete inside a headless container. Without --web, gh
-        # shows an "authenticate" prompt, we select "Login with a web browser" (Enter),
-        # and gh switches to the GitHub device activation flow at
-        # https://github.com/login/device with a proper one-time code.
-        command_variants = _gh_auth_login_command_variants(requested_scopes)
-        command = command_variants.pop(0)
-        _spawn_gh_auth_process_unlocked(command)
-
-    # Drive the interactive auth prompt then wait for the device code.
-    # Stage 1: gh asks "How would you like to authenticate?"
-    #          → press Enter to select "Login with a web browser" (first/default option)
-    # Stage 2: gh prints "First copy your one-time code: XXXX-XXXX"
-    #          → capture the code; press Enter so gh opens the activation URL
-    code_deadline = time.time() + 60  # 60s — gh startup + TUI paint can be slow
-    output = ""
-    details: dict[str, Any] = {}
-    git_prompt_answered = False
-    git_prompt_answered_at: float | None = None
-    auth_prompt_answered = False
-    code_entered = False
-
-    while time.time() < code_deadline:
-        time.sleep(0.5)
-        with GH_AUTH_LOCK:
-            output = _read_gh_auth_output_unlocked()
-            returncode = GH_AUTH_PROCESS.poll() if GH_AUTH_PROCESS is not None else None
-
-        if returncode is not None and returncode != 0:
-            with GH_AUTH_LOCK:
-                failure_output = _read_gh_auth_output_unlocked()
-                _cleanup_gh_auth_session_unlocked(stop_process=False)
-                should_retry_with_fallback = bool(
-                    command_variants
-                    and _gh_auth_start_failed_due_to_args(failure_output)
-                )
-                if should_retry_with_fallback:
-                    command = command_variants.pop(0)
-                    _spawn_gh_auth_process_unlocked(command)
-            message = _gh_auth_error_message(returncode, failure_output)
-            if should_retry_with_fallback:
-                LOGGER.warning(
-                    "Retrying GitHub CLI auth startup with fallback command after failure: returncode=%s message=%s fallback=%s",
-                    returncode,
-                    message,
-                    command,
-                )
-                continue
-            LOGGER.error(
-                "GitHub CLI browser auth failed to start: returncode=%s message=%s",
-                returncode,
-                message,
-            )
-            _clear_pending_device_flow({"code": "gh_auth_start_failed", "message": message})
-            raise BridgeError(
-                HTTPStatus.BAD_GATEWAY,
-                "gh_auth_start_failed",
-                message,
-            )
-
-        cleaned = _sanitize_terminal_output(output)
-        if cleaned:
-            LOGGER.debug("gh auth PTY output (cleaned):\n%s", cleaned)
-        lower_output = cleaned.lower()
-        if (
-            not git_prompt_answered
-            and (
-                "authenticate git with your github credentials" in lower_output
-                or (
-                    "authenticate git" in lower_output
-                    and "credentials" in lower_output
-                )
-            )
-        ):
-            LOGGER.info(
-                "Answering GitHub CLI git auth prompt: accepting GitHub credentials (Y)"
-            )
-            with GH_AUTH_LOCK:
-                if GH_AUTH_MASTER_FD is not None:
-                    try:
-                        os.write(GH_AUTH_MASTER_FD, b"Y\n")
-                    except OSError:
-                        pass
-            git_prompt_answered = True
-            git_prompt_answered_at = time.time()
-            continue
-
-        # Stage 1: answer the auth method prompt
-        if (
-            not auth_prompt_answered
-            and (
-                "login with a web browser" in lower_output
-                or "how would you like to authenticate" in lower_output
-                or "web browser" in lower_output
-            )
-        ):
-            LOGGER.info(
-                "Answering GitHub CLI auth prompt: selecting 'Login with a web browser'"
-            )
-            with GH_AUTH_LOCK:
-                if GH_AUTH_MASTER_FD is not None:
-                    try:
-                        os.write(GH_AUTH_MASTER_FD, b"\n")
-                    except OSError:
-                        pass
-            auth_prompt_answered = True
-            continue
-
-        if (
-            not auth_prompt_answered
-            and _gh_output_requests_enter(cleaned)
-        ):
-            LOGGER.info(
-                "Answering GitHub CLI auth prompt: pressing Enter when requested"
-            )
-            with GH_AUTH_LOCK:
-                if GH_AUTH_MASTER_FD is not None:
-                    try:
-                        os.write(GH_AUTH_MASTER_FD, b"\n")
-                    except OSError:
-                        pass
-            auth_prompt_answered = True
-            continue
-
-        # Stage 2: capture the device code
-        details = _extract_gh_auth_details(output)
-        if details.get("user_code") and not code_entered:
-            LOGGER.info(
-                "GitHub CLI printed device code after %.1fs; pressing Enter to open activation URL",
-                60 - (code_deadline - time.time()),
-            )
-            with GH_AUTH_LOCK:
-                if GH_AUTH_MASTER_FD is not None:
-                    try:
-                        os.write(GH_AUTH_MASTER_FD, b"\n")
-                    except OSError:
-                        pass
-            code_entered = True
-            # Read a moment longer to capture the activation URL if gh prints it
-            time.sleep(1.0)
-            with GH_AUTH_LOCK:
-                output = _read_gh_auth_output_unlocked()
-            details = _extract_gh_auth_details(output)
-            break
-
-    if not code_entered:
-        auth_status = auth_prompt_answered
-        LOGGER.warning(
-            "GitHub CLI did not print a device code within 60s; "
-            "auth_prompt_answered=%s — sending Enter anyway\nPTY output so far:\n%s",
-            auth_status,
-            _sanitize_terminal_output(output) or "(empty)",
-        )
-        with GH_AUTH_LOCK:
-            if GH_AUTH_MASTER_FD is not None:
-                try:
-                    os.write(GH_AUTH_MASTER_FD, b"\n")
-                except OSError:
-                    pass
-
-    with GH_AUTH_LOCK:
-        returncode = GH_AUTH_PROCESS.poll() if GH_AUTH_PROCESS is not None else None
-
-    if returncode is not None and returncode != 0:
-        with GH_AUTH_LOCK:
-            failure_output = _read_gh_auth_output_unlocked()
-            _cleanup_gh_auth_session_unlocked(stop_process=False)
-        message = _gh_auth_error_message(returncode, failure_output)
-        LOGGER.error(
-            "GitHub CLI browser auth failed to start: returncode=%s message=%s",
-            returncode,
-            message,
-        )
-        _clear_pending_device_flow({"code": "gh_auth_start_failed", "message": message})
-        raise BridgeError(
-            HTTPStatus.BAD_GATEWAY,
-            "gh_auth_start_failed",
-            message,
-        )
-
-    LOGGER.info(
-        "GitHub CLI browser auth started: pid=%s has_code=%s has_url=%s",
-        GH_AUTH_PROCESS.pid if GH_AUTH_PROCESS is not None else None,
-        bool(details.get("user_code")),
-        bool(details.get("verification_uri")),
-    )
-    if not details.get("user_code"):
-        LOGGER.warning(
-            "GitHub CLI browser auth did not expose a device code after full wait; "
-            "code may arrive on the next poll"
-        )
-    pending = {
-        "backend": "gh_cli",
-        "user_code": details.get("user_code"),
-        "verification_uri": details.get("verification_uri"),
-        "expires_at": None,
-        "interval": 2,
-        "scope": requested_scopes,
-        "last_poll_at": 0,
-    }
-    _update_github_state(pending_device_flow=pending, last_error=None)
-    return {
-        "status": "pending",
-        **_public_pending_device_flow(pending),
-    }
-
-
-def _poll_gh_cli_device_flow() -> dict[str, Any]:
-    github = _get_github_state()
-    pending = github.get("pending_device_flow")
-    if not pending:
-        raise BridgeError(
-            HTTPStatus.BAD_REQUEST,
-            "device_flow_not_started",
-            "No GitHub browser sign-in is currently pending.",
-        )
-
-    now = int(time.time())
-    pending["last_poll_at"] = now
-
-    with GH_AUTH_LOCK:
-        output = _read_gh_auth_output_unlocked()
-        returncode = GH_AUTH_PROCESS.poll() if GH_AUTH_PROCESS is not None else None
-
-    details = _extract_gh_auth_details(output)
-    pending["user_code"] = details.get("user_code")
-    pending["verification_uri"] = details.get("verification_uri")
-    _update_github_state(pending_device_flow=pending, last_error=None)
-    LOGGER.info(
-        "Polling GitHub CLI browser auth: returncode=%s has_code=%s has_url=%s",
-        returncode,
-        bool(pending.get("user_code")),
-        bool(pending.get("verification_uri")),
-    )
-
-    if returncode is None:
-        return {
-            "status": "pending",
-            "message": (
-                "Open the verification URL, enter the device code, and approve access."
-                if pending.get("user_code")
-                else "Waiting for GitHub CLI to provide a browser sign-in code."
-            ),
-            **_public_pending_device_flow(pending),
-        }
-
-    if returncode != 0:
-        with GH_AUTH_LOCK:
-            failure_output = _read_gh_auth_output_unlocked()
-            _cleanup_gh_auth_session_unlocked(stop_process=False)
-        message = _gh_auth_error_message(returncode, failure_output)
-        LOGGER.error(
-            "GitHub CLI browser auth failed during poll: returncode=%s message=%s",
-            returncode,
-            message,
-        )
-        _clear_pending_device_flow({"code": "gh_auth_failed", "message": message})
-        raise BridgeError(
-            HTTPStatus.BAD_GATEWAY,
-            "gh_auth_failed",
-            message,
-        )
-
-    token = _get_gh_cli_token()
-    user, scope = _fetch_github_user(token)
-    with GH_AUTH_LOCK:
-        _cleanup_gh_auth_session_unlocked(stop_process=False)
-    LOGGER.info(
-        "GitHub CLI browser auth completed successfully for user=%s scope=%s",
-        (user or {}).get("login"),
-        scope or pending.get("scope"),
-    )
-    _update_github_state(
-        access_token=token,
-        token_type="bearer",
-        scope=scope or pending.get("scope"),
-        source="gh_cli",
-        user=user,
-        pending_device_flow=None,
-        last_error=None,
-    )
-    return {
-        "status": "authorized",
-        "authenticated": True,
-        "auth_mode": "gh_cli",
-        "user": user,
-        "scope": scope or pending.get("scope"),
-    }
 
 
 def _start_oauth_device_flow(scopes: str | None) -> dict[str, Any]:
@@ -1386,30 +757,22 @@ def _poll_oauth_device_flow() -> dict[str, Any]:
 
 def _start_device_flow(scopes: str | None) -> dict[str, Any]:
     backend = _device_flow_backend()
-    if backend == "gh_cli":
-        return _start_gh_cli_device_flow(scopes)
     if backend == "oauth_app":
         return _start_oauth_device_flow(scopes)
     raise BridgeError(
         HTTPStatus.BAD_REQUEST,
         "device_flow_not_available",
-        "GitHub browser sign-in is not available on the bridge.",
+        "OAuth device flow is not available because GITHUB_OAUTH_CLIENT_ID is not configured.",
     )
 
 
 def _restart_device_flow(scopes: str | None) -> dict[str, Any]:
-    LOGGER.info("Restarting GitHub browser sign-in flow from scratch")
-    with GH_AUTH_LOCK:
-        _cleanup_gh_auth_session_unlocked(stop_process=True)
+    LOGGER.info("Restarting GitHub OAuth device flow from scratch")
     _update_github_state(pending_device_flow=None, last_error=None)
     return _start_device_flow(scopes)
 
 
 def _poll_device_flow() -> dict[str, Any]:
-    pending = (_get_github_state().get("pending_device_flow") or {})
-    backend = pending.get("backend") or _device_flow_backend()
-    if backend == "gh_cli":
-        return _poll_gh_cli_device_flow()
     return _poll_oauth_device_flow()
 
 
@@ -1446,11 +809,7 @@ def _set_github_token(token: str) -> dict[str, Any]:
 
 
 def _clear_github_auth() -> dict[str, Any]:
-    with GH_AUTH_LOCK:
-        _cleanup_gh_auth_session_unlocked(stop_process=True)
-    if GH_CONFIG_DIR.exists():
-        shutil.rmtree(GH_CONFIG_DIR, ignore_errors=True)
-    LOGGER.info("Cleared GitHub auth state and removed persisted GitHub CLI config")
+    LOGGER.info("Cleared GitHub auth state")
     _update_github_state(
         access_token=CONFIGURED_GITHUB_TOKEN or None,
         token_type="bearer" if CONFIGURED_GITHUB_TOKEN else None,
@@ -1862,15 +1221,13 @@ def main() -> None:
     server = ThreadingHTTPServer(("0.0.0.0", PORT), BridgeHandler)
     _register_zeroconf_service()
     LOGGER.info(
-        "copilot_bridge listening on :%s version=%s log_level=%s auth_backend=%s gh_cli=%s oauth_client=%s auth_state_path=%s gh_config_dir=%s",
+        "copilot_bridge listening on :%s version=%s log_level=%s auth_backend=%s oauth_client=%s auth_state_path=%s",
         PORT,
         BRIDGE_VERSION,
         LOG_LEVEL,
         _device_flow_backend(),
-        _gh_cli_available(),
         bool(GITHUB_OAUTH_CLIENT_ID),
         AUTH_STATE_PATH,
-        GH_CONFIG_DIR,
     )
     try:
         server.serve_forever()

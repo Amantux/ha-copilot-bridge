@@ -65,8 +65,8 @@ Notes:
 - publish port `8099` only if Home Assistant needs to reach the container over your Docker network or host
 - mount a persistent volume and point `GITHUB_AUTH_STATE_PATH` into it so device-flow and pasted-token auth survive restarts
 - if you prefer a static token, set `GITHUB_TOKEN` instead of browser sign-in
-- the preferred browser sign-in path uses the GitHub CLI inside the bridge image, so you usually do not need to create a separate GitHub OAuth app
-- `GITHUB_OAUTH_CLIENT_ID` is only needed if you intentionally want the legacy OAuth-app fallback
+- browser sign-in uses GitHub OAuth device flow
+- set `GITHUB_OAUTH_CLIENT_ID` to enable OAuth device flow
 - if Home Assistant runs in Docker too, use a shared Docker network and configure the integration with a stable container hostname or service name instead of `localhost`
 - keep that hostname stable across updates by using Docker Compose service names, a fixed container name, or another persistent internal DNS name
 

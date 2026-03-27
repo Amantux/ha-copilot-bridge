@@ -62,7 +62,7 @@ It is intentionally not focused on:
 
 ## GitHub authentication workflow
 
-The project currently supports two main auth paths, with bridge-managed GitHub CLI browser sign-in preferred when available.
+The project supports OAuth device flow and manual token auth.
 
 Inside the Home Assistant integration, GitHub configuration is now handled as its own config-flow step after the bridge connection step. That keeps bridge connectivity separate from GitHub auth selection.
 
@@ -73,23 +73,7 @@ The integration also checks current bridge auth state during setup so it can gui
 - reuse an existing bridge GitHub session when appropriate
 - resume a pending device flow instead of starting a duplicate one
 
-### Browser sign-in through GitHub CLI
-
-Preferred when the bridge image includes `gh` and you want a sign-in flow similar to the GitHub CLI.
-
-Typical flow:
-
-1. The integration asks the bridge to start browser sign-in.
-2. The bridge starts `gh auth login --web`.
-3. The bridge returns the GitHub verification URL and one-time code.
-4. You open the page in a browser, enter the code, and approve access.
-5. The integration polls the bridge until auth completes.
-
-This path does not require creating a separate GitHub OAuth app just to get a client ID.
-
-### Legacy OAuth device flow
-
-Still supported as a fallback when the bridge does not have GitHub CLI available but does have a configured OAuth client ID.
+### OAuth device flow
 
 Requirements:
 
@@ -125,17 +109,15 @@ Recommended environment variables:
 
 - `BRIDGE_API_KEY`: optional shared secret for the integration
 - `GITHUB_TOKEN`: static GitHub token to use at startup
-- `GITHUB_OAUTH_CLIENT_ID`: optional legacy fallback for direct OAuth device flow
+- `GITHUB_OAUTH_CLIENT_ID`: enables OAuth device flow
 - `GITHUB_OAUTH_SCOPES`: default requested scopes for device flow
 - `GITHUB_AUTH_STATE_PATH`: file path where device-flow or pasted-token auth state is persisted
-- `GH_CONFIG_DIR`: optional path for persisted GitHub CLI auth state used by the bridge
 
 Container recommendations:
 
 - mount a persistent volume and place `GITHUB_AUTH_STATE_PATH` inside it
 - use `GITHUB_TOKEN` when you want immutable operator-managed credentials
-- use the bridge image with `gh` installed plus a persistent `GITHUB_AUTH_STATE_PATH` when you want browser-assisted login from the Home Assistant integration without creating an OAuth app
-- use `GITHUB_OAUTH_CLIENT_ID` only if you want the legacy OAuth-app fallback instead
+- use `GITHUB_OAUTH_CLIENT_ID` when you want OAuth-app device flow
 
 Startup precedence:
 
@@ -162,7 +144,6 @@ Use this sequence when Home Assistant and the bridge run as separate containers:
 
 If browser sign-in is unavailable, the bridge will show `browser_auth_supported: false` in `/health` and `/auth/status`. In that case:
 
-- install `gh` in the bridge image, or
 - set `GITHUB_OAUTH_CLIENT_ID` for OAuth-app device flow, or
 - use manual token setup.
 

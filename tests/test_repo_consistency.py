@@ -37,12 +37,11 @@ class RepoConsistencyTests(unittest.TestCase):
             "server runtime files drifted; keep both copies identical",
         )
 
-    def test_gh_auth_login_variants_exist(self) -> None:
+    def test_server_does_not_include_gh_cli(self) -> None:
         server = (REPO_ROOT / "copilot_bridge/rootfs/app/server.py").read_text()
-        self.assertIn("def _gh_auth_login_command_variants", server)
-        self.assertIn('"--git-protocol"', server)
-        self.assertIn('"https"', server)
-        self.assertIn("fallback", server)
+        self.assertNotIn("gh_cli", server)
+        self.assertNotIn("GitHub CLI", server)
+        self.assertNotIn("gh auth", server)
 
 
 if __name__ == "__main__":
