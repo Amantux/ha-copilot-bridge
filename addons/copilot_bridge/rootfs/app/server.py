@@ -1329,6 +1329,14 @@ def _start_device_flow(scopes: str | None) -> dict[str, Any]:
     )
 
 
+def _restart_device_flow(scopes: str | None) -> dict[str, Any]:
+    LOGGER.info("Restarting GitHub browser sign-in flow from scratch")
+    with GH_AUTH_LOCK:
+        _cleanup_gh_auth_session_unlocked(stop_process=True)
+    _update_github_state(pending_device_flow=None, last_error=None)
+    return _start_device_flow(scopes)
+
+
 def _poll_device_flow() -> dict[str, Any]:
     pending = (_get_github_state().get("pending_device_flow") or {})
     backend = pending.get("backend") or _device_flow_backend()
@@ -1614,6 +1622,18 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 self._read_json()
                 LOGGER.debug("Received GitHub auth poll request")
                 self._send_json(HTTPStatus.OK, _poll_device_flow())
+                return
+
+            if self.path == "/auth/device/restart":
+                payload = self._read_json()
+                LOGGER.info(
+                    "Received GitHub auth restart request: scopes=%s",
+                    str(payload.get("scopes", "")).strip() or GITHUB_OAUTH_SCOPES,
+                )
+                self._send_json(
+                    HTTPStatus.OK,
+                    _restart_device_flow(str(payload.get("scopes", "")).strip() or None),
+                )
                 return
 
             if self.path == "/auth/token":

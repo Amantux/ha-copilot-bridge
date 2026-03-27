@@ -67,7 +67,8 @@
       "invalid_auth": "Failed to validate the GitHub token",
       "device_flow_error": "GitHub device flow could not be completed",
       "device_flow_not_available": "GitHub browser sign-in is not available on the bridge",
-      "bridge_auth_not_configured": "GitHub auth is not configured on the bridge yet"
+      "bridge_auth_not_configured": "GitHub auth is not configured on the bridge yet",
+      "clear_auth_failed": "Failed to clear GitHub auth on the bridge"
     },
     "abort": {
       "already_configured": "This bridge is already configured"
