@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.13] - 2026-03-27
+
+### Added
+- Added an explicit `copilot_bridge` Home Assistant Supervisor discovery identifier to the integration manifest so discovery can surface through the Integrations **Discovered** flow.
+
+### Changed
+- Bumped integration and add-on version metadata to `0.1.13`.
+
 ## [0.1.12] - 2026-03-27
 - Simplify GitHub auth flow to focus on OAuth device flow and token-based auth.
 - Fix Home Assistant Supervisor discovery mapping by aligning the integration `hassio` slug with the add-on slug.
