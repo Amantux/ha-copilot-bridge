@@ -17,7 +17,7 @@ else:
     ServiceInfo = None
     Zeroconf = None
 
-BRIDGE_VERSION = "0.1.11"
+BRIDGE_VERSION = "0.1.14"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 COPILOT_API_TOKEN = os.getenv("COPILOT_API_TOKEN", "").strip()
 PORT = int(os.getenv("BRIDGE_PORT", "8099"))

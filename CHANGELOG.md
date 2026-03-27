@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.14] - 2026-03-27
+
+### Changed
+- Bumped bridge runtime, add-on, and integration version metadata to `0.1.14`.
+
 ## [0.1.13] - 2026-03-27
 
 ### Added
