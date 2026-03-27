@@ -27,7 +27,7 @@ else:
     Zeroconf = None
 
 
-BRIDGE_VERSION = "0.1.9"
+BRIDGE_VERSION = "0.1.11"
 API_KEY = os.getenv("BRIDGE_API_KEY", "")
 CONFIGURED_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
@@ -232,6 +232,23 @@ def _gh_env() -> dict[str, str]:
     return env
 
 
+def _ensure_private_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chmod(path, 0o700)
+    except OSError as err:
+        LOGGER.warning("Could not enforce 0700 permissions on %s: %s", path, err)
+
+
+def _ensure_private_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        os.chmod(path, 0o600)
+    except OSError as err:
+        LOGGER.warning("Could not enforce 0600 permissions on %s: %s", path, err)
+
+
 def _trim_for_log(value: str, limit: int = 400) -> str:
     if len(value) <= limit:
         return value
@@ -341,6 +358,17 @@ def _extract_gh_auth_details(output: str) -> dict[str, Any]:
         "user_code": user_code,
         "verification_uri": verification_uri or f"https://{GH_HOST}/login/device",
     }
+
+
+def _gh_output_requests_enter(cleaned_output: str) -> bool:
+    lower_output = cleaned_output.lower()
+    return (
+        "press enter to open" in lower_output
+        or "press enter to open github.com" in lower_output
+        or "press enter to open the browser" in lower_output
+        or "press enter to continue" in lower_output
+        or "first copy your one-time code" in lower_output
+    )
 
 
 def _public_pending_device_flow(pending: dict[str, Any]) -> dict[str, Any]:
@@ -514,8 +542,9 @@ def _home_assistant_mcp_auth_mode() -> str:
 
 def _persist_auth_state_unlocked() -> None:
     try:
-        AUTH_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_private_directory(AUTH_STATE_PATH.parent)
         AUTH_STATE_PATH.write_text(json.dumps(AUTH_STATE, indent=2), encoding="utf-8")
+        _ensure_private_file(AUTH_STATE_PATH)
     except OSError as err:
         LOGGER.exception("Failed to persist GitHub auth state to %s", AUTH_STATE_PATH)
         raise BridgeError(
@@ -860,7 +889,7 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
                 }
 
         _cleanup_gh_auth_session_unlocked(stop_process=True)
-        GH_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        _ensure_private_directory(GH_CONFIG_DIR)
         master_fd, slave_fd = pty.openpty()
         # Use the standard interactive device code flow — the same flow used by
         # GitHub Copilot CLI. Do NOT use --web: that forces a PKCE localhost-redirect
@@ -982,12 +1011,10 @@ def _start_gh_cli_device_flow(scopes: str | None) -> dict[str, Any]:
 
         if (
             not auth_prompt_answered
-            and git_prompt_answered
-            and git_prompt_answered_at is not None
-            and time.time() - git_prompt_answered_at > 0.75
+            and _gh_output_requests_enter(cleaned)
         ):
             LOGGER.info(
-                "Assuming GitHub CLI auth prompt is ready; pressing Enter for default"
+                "Answering GitHub CLI auth prompt: pressing Enter when requested"
             )
             with GH_AUTH_LOCK:
                 if GH_AUTH_MASTER_FD is not None:
