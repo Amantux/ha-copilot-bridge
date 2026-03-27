@@ -16,6 +16,13 @@
           "api_key": "API key"
         }
       },
+      "zeroconf_confirm": {
+        "title": "Connect to discovered Copilot Bridge",
+        "description": "Home Assistant discovered {name} at {url}. Enter the bridge API key if required, then submit to test the connection.",
+        "data": {
+          "api_key": "API key"
+        }
+      },
       "bridge_connection_test": {
         "title": "Bridge connection tested",
         "description": "Bridge connection succeeded. Service: {service}. Version: {version}. GitHub browser sign-in: {github_browser_auth_status}. GitHub token: {github_token_status}. Auth storage: {github_auth_storage}. Home Assistant MCP: {mcp_status}. Submit to continue."
@@ -47,7 +54,7 @@
       },
       "mcp_config": {
         "title": "Configure Home Assistant MCP",
-        "description": "Configure MCP after GitHub setup. Enable it only if this bridge should request the Home Assistant MCP server for prompts.",
+        "description": "Configure MCP after GitHub setup. This bridge is designed to pair GitHub Copilot with Home Assistant context through MCP. Enable this when you want Copilot prompts to use your Home Assistant MCP server.",
         "data": {
           "use_home_assistant_mcp": "Use Home Assistant MCP server",
           "home_assistant_mcp_server_name": "Home Assistant MCP server name"
@@ -95,7 +102,7 @@
       },
       "mcp_config": {
         "title": "Configure Home Assistant MCP",
-        "description": "Configure MCP after GitHub setup. Enable it only if this bridge should request the Home Assistant MCP server for prompts.",
+        "description": "Configure MCP after GitHub setup. This bridge is designed to pair GitHub Copilot with Home Assistant context through MCP. Enable this when you want Copilot prompts to use your Home Assistant MCP server.",
         "data": {
           "use_home_assistant_mcp": "Use Home Assistant MCP server",
           "home_assistant_mcp_server_name": "Home Assistant MCP server name"
